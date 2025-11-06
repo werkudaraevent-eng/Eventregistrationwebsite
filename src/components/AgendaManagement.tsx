@@ -1,0 +1,555 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { Badge } from './ui/badge';
+import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, RefreshCw } from 'lucide-react';
+import * as localDB from '../utils/localStorage';
+
+type AgendaItem = localDB.AgendaItem;
+type Participant = localDB.Participant;
+
+interface AgendaManagementProps {
+  eventId: string;
+  accessToken: string;
+}
+
+export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps) {
+  const [agendaItems, setAgendaItems] = useState<AgendaItem[]>([]);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedAgendaForParticipants, setSelectedAgendaForParticipants] = useState<string | null>(null);
+  const [editingAgenda, setEditingAgenda] = useState<AgendaItem | null>(null);
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [dropdownPosition, setDropdownPosition] = useState<{ top?: number; bottom?: number; right: number }>({ right: 0 });
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    startTime: '',
+    endTime: '',
+    location: '',
+  });
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setOpenDropdownId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Calculate dropdown position based on viewport
+  const calculateDropdownPosition = useCallback((button: HTMLElement) => {
+    const rect = button.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const dropdownHeight = 150; // Approximate dropdown height
+    const dropdownWidth = 192; // 48 * 4 = 192px (w-48)
+
+    const position: { top?: number; bottom?: number; right: number } = {
+      right: viewportWidth - rect.right
+    };
+
+    // If not enough space below but more space above, show above
+    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+      position.bottom = viewportHeight - rect.top + 4; // 4px gap
+    } else {
+      position.top = rect.bottom + 4; // 4px gap
+    }
+
+    setDropdownPosition(position);
+  }, []);
+
+  const fetchAgenda = async () => {
+    setIsLoading(true);
+    try {
+      console.log('[LOCAL] Fetching agenda from localStorage for event:', eventId);
+      const agenda = localDB.getAllAgenda(eventId);
+      setAgendaItems(agenda);
+    } catch (err: any) {
+      console.error('[LOCAL] Error fetching agenda:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchParticipants = async () => {
+    try {
+      console.log('[LOCAL] Fetching participants from localStorage for event:', eventId);
+      const participants = localDB.getAllParticipants(eventId);
+      setParticipants(participants);
+      setLastUpdated(new Date());
+    } catch (err: any) {
+      console.error('[LOCAL] Error fetching participants:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAgenda();
+    fetchParticipants();
+  }, [eventId, accessToken]);
+
+  // Auto-refresh: Listen for localStorage changes from other tabs/windows
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      console.log('[AGENDA AUTO-REFRESH] Storage event detected:', e.key);
+      if (e.key === 'event_participants') {
+        console.log('[AGENDA AUTO-REFRESH] Participant data changed, refreshing...');
+        fetchParticipants();
+      }
+      if (e.key === 'event_agenda') {
+        console.log('[AGENDA AUTO-REFRESH] Agenda data changed, refreshing...');
+        fetchAgenda();
+      }
+    };
+
+    // Custom event listener for same-tab updates (instant)
+    const handleParticipantsUpdated = (e: Event) => {
+      console.log('[AGENDA AUTO-REFRESH] Custom participantsUpdated event detected:', (e as CustomEvent).detail);
+      fetchParticipants();
+    };
+
+    // Listen for changes from other tabs
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('participantsUpdated', handleParticipantsUpdated);
+
+    // Polling mechanism for same-tab updates (every 3 seconds) - fallback
+    const pollInterval = setInterval(() => {
+      console.log('[AGENDA AUTO-REFRESH] Polling for participant updates...');
+      fetchParticipants();
+    }, 3000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('participantsUpdated', handleParticipantsUpdated);
+      clearInterval(pollInterval);
+    };
+  }, [eventId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+
+    try {
+      console.log('[LOCAL] Saving agenda item:', formData);
+      
+      if (editingAgenda) {
+        // Update existing agenda
+        localDB.updateAgendaItem(editingAgenda.id, formData);
+      } else {
+        // Create new agenda
+        const agendaItem: AgendaItem = {
+          id: localDB.generateAgendaId(),
+          eventId: eventId,
+          title: formData.title,
+          description: formData.description,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          location: formData.location,
+          createdAt: new Date().toISOString(),
+        };
+        localDB.saveAgendaItem(agendaItem);
+      }
+
+      setFormData({ title: '', description: '', startTime: '', endTime: '', location: '' });
+      setEditingAgenda(null);
+      setIsDialogOpen(false);
+      await fetchAgenda();
+    } catch (err: any) {
+      console.error('[LOCAL] Error saving agenda item:', err);
+      alert(editingAgenda ? 'Failed to update agenda item' : 'Failed to create agenda item');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleEdit = (item: AgendaItem) => {
+    setEditingAgenda(item);
+    setFormData({
+      title: item.title,
+      description: item.description,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      location: item.location,
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDialogChange = (open: boolean) => {
+    setIsDialogOpen(open);
+    if (!open) {
+      setEditingAgenda(null);
+      setFormData({ title: '', description: '', startTime: '', endTime: '', location: '' });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this agenda item?')) {
+      return;
+    }
+
+    try {
+      console.log('[LOCAL] Deleting agenda item:', id);
+      localDB.deleteAgendaItem(id);
+      await fetchAgenda();
+    } catch (err: any) {
+      console.error('Error deleting agenda item:', err);
+      alert('Failed to delete agenda item');
+    }
+  };
+
+  const formatTime = (datetime: string) => {
+    if (!datetime) return '-';
+    return new Date(datetime).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const getParticipantsForAgenda = (agendaTitle: string) => {
+    return participants.filter(p => 
+      p.attendance && p.attendance.some(a => a.agendaItem === agendaTitle)
+    );
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <Card className="border-0 shadow-xl bg-white">
+      <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-purple-50 to-pink-50">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-3 text-2xl">
+              <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-md shadow-purple-500/30">
+                <Calendar className="h-5 w-5 text-white" />
+              </div>
+              Event Agenda
+            </CardTitle>
+            <CardDescription className="flex items-center gap-3 mt-2 text-base">
+              <span>Manage event schedule and sessions</span>
+              <span className="flex items-center gap-2 text-sm text-gray-600">
+                <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                Auto-sync • Updated {lastUpdated.toLocaleTimeString()}
+              </span>
+            </CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="border-gray-300 hover:border-gray-400"
+              size="sm"
+              onClick={() => {
+                fetchAgenda();
+                fetchParticipants();
+              }}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refresh
+            </Button>
+            <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
+              <DialogTrigger asChild>
+                <Button className="gradient-primary hover:opacity-90 shadow-md shadow-purple-500/30">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Session
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{editingAgenda ? 'Edit Agenda Item' : 'Create Agenda Item'}</DialogTitle>
+                  <DialogDescription>
+                    {editingAgenda ? 'Update the session details' : 'Add a new session or activity to the event schedule'}
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="title">Session Title *</Label>
+                    <Input
+                      id="title"
+                      placeholder="Opening Ceremony"
+                      value={formData.title}
+                      onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="description">Description</Label>
+                    <Textarea
+                      id="description"
+                      placeholder="Describe the session..."
+                      value={formData.description}
+                      onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                      rows={3}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="startTime">Start Time *</Label>
+                      <Input
+                        id="startTime"
+                        type="datetime-local"
+                        value={formData.startTime}
+                        onChange={(e) => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="endTime">End Time</Label>
+                      <Input
+                        id="endTime"
+                        type="datetime-local"
+                        value={formData.endTime}
+                        onChange={(e) => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="location">Location</Label>
+                    <Input
+                      id="location"
+                      placeholder="Main Hall"
+                      value={formData.location}
+                      onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                    />
+                  </div>
+
+                  <Button type="submit" className="w-full" disabled={isSubmitting}>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {editingAgenda ? 'Updating...' : 'Creating...'}
+                      </>
+                    ) : (
+                      editingAgenda ? 'Update Session' : 'Create Session'
+                    )}
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="overflow-visible">
+        {agendaItems.length === 0 ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+            <p>No agenda items yet</p>
+            <p className="text-sm">Click "Add Session" to create the event schedule</p>
+          </div>
+        ) : (
+          <div className="rounded-md border overflow-visible">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Session</TableHead>
+                  <TableHead>Start Time</TableHead>
+                  <TableHead>End Time</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {agendaItems
+                  .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+                  .map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div>
+                          <div>{item.title}</div>
+                          {item.description && (
+                            <div className="text-sm text-muted-foreground mt-1">
+                              {item.description}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">{formatTime(item.startTime)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm">{formatTime(item.endTime)}</span>
+                      </TableCell>
+                      <TableCell>
+                        {item.location ? (
+                          <div className="flex items-center gap-2">
+                            <MapPin className="h-4 w-4 text-muted-foreground" />
+                            <span className="text-sm">{item.location}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-1 justify-end items-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedAgendaForParticipants(item.title)}
+                            title="View Participants"
+                          >
+                            <Users className="h-4 w-4" />
+                          </Button>
+                          <div className="relative">
+                            <Button 
+                              ref={(el) => {
+                                buttonRefs.current[item.id] = el;
+                              }}
+                              variant="ghost" 
+                              size="sm"
+                              title="More options"
+                              onClick={(e) => {
+                                const isOpening = openDropdownId !== item.id;
+                                setOpenDropdownId(isOpening ? item.id : null);
+                                if (isOpening && e.currentTarget) {
+                                  calculateDropdownPosition(e.currentTarget);
+                                }
+                              }}
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {/* Dropdown Menu Portal - Rendered outside table to prevent clipping */}
+        {openDropdownId && (
+          <div 
+            ref={dropdownRef}
+            className="fixed w-48 bg-popover border rounded-md shadow-xl p-1"
+            style={{
+              top: dropdownPosition.top,
+              bottom: dropdownPosition.bottom,
+              right: dropdownPosition.right,
+              zIndex: 9999,
+              maxHeight: 'calc(100vh - 100px)',
+              overflowY: 'auto'
+            }}
+          >
+            {agendaItems.find(item => item.id === openDropdownId) && (() => {
+              const item = agendaItems.find(i => i.id === openDropdownId)!;
+              return (
+                <>
+                  <button
+                    onClick={() => {
+                      // Open check-in page in new window
+                      const checkInUrl = `${window.location.origin}${window.location.pathname}?checkin=${item.id}`;
+                      window.open(checkInUrl, '_blank');
+                      setOpenDropdownId(null);
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground outline-none cursor-pointer text-left"
+                  >
+                    <LogIn className="h-4 w-4" />
+                    Open Check-In Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleEdit(item);
+                      setOpenDropdownId(null);
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground outline-none cursor-pointer text-left"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Modify
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleDelete(item.id);
+                      setOpenDropdownId(null);
+                    }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-destructive/10 text-destructive outline-none cursor-pointer text-left"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete
+                  </button>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Participants List Dialog */}
+        <Dialog open={!!selectedAgendaForParticipants} onOpenChange={(open) => !open && setSelectedAgendaForParticipants(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Participants for: {selectedAgendaForParticipants}</DialogTitle>
+              <DialogDescription>
+                {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).length} attendees
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-96 overflow-y-auto">
+              {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Users className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                  <p>No participants yet for this session</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Company</TableHead>
+                      <TableHead>Position</TableHead>
+                      <TableHead>Check-in Time</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).map((participant) => {
+                      const attendance = participant.attendance.find(a => a.agendaItem === selectedAgendaForParticipants);
+                      return (
+                        <TableRow key={participant.id}>
+                          <TableCell>{participant.name}</TableCell>
+                          <TableCell>{participant.email}</TableCell>
+                          <TableCell>{participant.company || '-'}</TableCell>
+                          <TableCell>{participant.position || '-'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {attendance && new Date(attendance.timestamp).toLocaleTimeString()}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      </CardContent>
+    </Card>
+  );
+}
