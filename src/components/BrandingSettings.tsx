@@ -16,9 +16,10 @@ import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Palette, Upload, Eye, Save, X } from 'lucide-react';
-import * as localDB from '../utils/localStorage';
+import localDB from '../utils/localDBStub';
+import type { BrandingSettings as BrandingSettingsType } from '../utils/localDBStub';
 
-type BrandingSettings = localDB.BrandingSettings;
+type BrandingSettings = BrandingSettingsType;
 
 interface BrandingSettingsProps {
   eventId: string;

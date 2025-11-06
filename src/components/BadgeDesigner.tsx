@@ -24,13 +24,8 @@ import {
 } from 'lucide-react';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import QRCodeLib from 'qrcode';
-import * as localDB from '../utils/localStorage';
-import { projectId, publicAnonKey } from '../utils/supabase/info';
-import { createClient } from '@supabase/supabase-js';
-
-type BadgeSettings = localDB.BadgeSettings;
-type Event = localDB.Event;
-type CustomField = localDB.CustomField;
+import localDB from '../utils/localDBStub';
+import type { BadgeSettings, Event } from '../utils/localDBStub';
 
 interface BadgeDesignerProps {
   eventId: string;
@@ -70,6 +65,16 @@ const BADGE_SIZES = {
 
 const CANVAS_SCALE = 3.5; // Pixel scale factor for better visibility
 
+// Utility function for color readability
+const ensureReadableColor = (value?: string): string => {
+  if (!value) return '#000000';
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '#fff' || normalized === '#ffffff' || normalized === 'white') {
+    return '#000000';
+  }
+  return value;
+};
+
 export function BadgeDesigner({ eventId, onClose }: BadgeDesignerProps) {
   return <BadgeDesignerContent eventId={eventId} onClose={onClose} />;
 }
@@ -99,15 +104,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       loadEvent();
     }
   }, [eventId]);
-
-  const ensureReadableColor = (value?: string): string => {
-    if (!value) return '#000000';
-    const normalized = value.trim().toLowerCase();
-    if (normalized === '#fff' || normalized === '#ffffff' || normalized === 'white') {
-      return '#000000';
-    }
-    return value;
-  };
 
   const normalizeComponent = (component: any): CanvasComponent => ({
     ...component,
@@ -211,7 +207,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       setSaveSuccess(true);
       setTimeout(() => {
         setSaveSuccess(false);
-        onClose();
+        onClose?.();
       }, 1500);
     } catch (error) {
       console.error('Error saving badge settings:', error);
@@ -323,35 +319,14 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
 
     setIsUploadingBg(true);
     try {
-      const supabase = createClient(
-        `https://${projectId}.supabase.co`,
-        publicAnonKey
-      );
-
-      // Generate unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${eventId}-bg-${Date.now()}.${fileExt}`;
-      const filePath = `badge-backgrounds/${fileName}`;
-
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('make-04dd31ce-badge-images')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        throw uploadError;
-      }
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('make-04dd31ce-badge-images')
-        .getPublicUrl(filePath);
-
-      updateSettings({ backgroundImageUrl: publicUrl });
+      // TODO: Implement Supabase image upload using proper client
+      // For now, create a local data URL placeholder
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        updateSettings({ backgroundImageUrl: dataUrl });
+      };
+      reader.readAsDataURL(file);
       
     } catch (error: any) {
       console.error('Error uploading background image:', error);
@@ -365,7 +340,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     return null;
   }
 
-  const selectedSize = BADGE_SIZES[settings.size];
+  const selectedSize = BADGE_SIZES[settings.size || 'CR80'];
   const width = settings.size === 'custom' ? settings.customWidth || 100 : selectedSize.width;
   const height = settings.size === 'custom' ? settings.customHeight || 100 : selectedSize.height;
   const canvasWidth = width * CANVAS_SCALE;
@@ -431,7 +406,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                     <div className="space-y-3">
                       <RadioGroup
                         value={settings.size}
-                        onValueChange={(value) => updateSettings({ size: value as any })}
+                        onValueChange={(value: string) => updateSettings({ size: value as any })}
                         className="space-y-2"
                       >
                         {Object.entries(BADGE_SIZES).map(([key, { label }]) => (
@@ -934,7 +909,7 @@ function CanvasComponentItem({
     };
   }, [isDragging, dragStart, canvasWidth, canvasHeight, component.id, component.width, component.height, onMove]);
 
-  const handleResizeStop = (e: any, direction: any, ref: any, delta: any) => {
+  const handleResizeStop = (_e: any, _direction: any, ref: any, _delta: any) => {
     const newWidth = (ref.offsetWidth / canvasWidth) * 100;
     const newHeight = (ref.offsetHeight / canvasHeight) * 100;
     onResize(component.id, Math.min(100, newWidth), Math.min(100, newHeight));
@@ -1162,7 +1137,7 @@ function ComponentStylingPanel({
                   <Label className="text-xs font-semibold text-slate-600">Font Family</Label>
                   <Select
                     value={component.fontFamily || 'sans-serif'}
-                    onValueChange={(value) => onUpdate({ fontFamily: value })}
+                    onValueChange={(value: string) => onUpdate({ fontFamily: value })}
                   >
                     <SelectTrigger className="h-9 text-sm">
                       <SelectValue />
@@ -1318,7 +1293,7 @@ function ComponentStylingPanel({
               <div className="flex items-center gap-3 border-t pt-3">
                 <Switch
                   checked={component.enabled}
-                  onCheckedChange={(checked) => onUpdate({ enabled: checked })}
+                  onCheckedChange={(checked: boolean | 'indeterminate') => onUpdate({ enabled: checked as boolean })}
                 />
                 <Label className="text-xs font-semibold text-slate-600">Show on badge</Label>
               </div>

@@ -16,15 +16,11 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { Checkbox } from './ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { AlertCircle, CheckCircle2, Calendar, MapPin, Loader2 } from 'lucide-react';
-import * as localDB from '../utils/localStorage';
-
-type Event = localDB.Event;
-type CustomField = localDB.CustomField;
-type BrandingSettings = localDB.BrandingSettings;
+import { supabase } from '../utils/supabase/client';
+import type { Event, BrandingSettings } from '../utils/localDBStub';
 
 interface PublicRegistrationFormProps {
   eventId: string;
@@ -52,21 +48,45 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     loadEventData();
   }, [eventId]);
 
-  const loadEventData = () => {
+  const loadEventData = async () => {
     setIsLoading(true);
     try {
-      // Load event
-      const loadedEvent = localDB.getEventById(eventId);
-      if (!loadedEvent) {
+      // Load event from Supabase
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('*')
+        .eq('id', eventId)
+        .single();
+      
+      if (eventError || !eventData) {
         setError('Event not found. Please check the registration link.');
         setIsLoading(false);
         return;
       }
       
+      const loadedEvent: Event = {
+        id: eventData.id,
+        name: eventData.name,
+        startDate: eventData.startDate,
+        endDate: eventData.endDate,
+        location: eventData.location,
+        description: eventData.description,
+        createdAt: eventData.createdAt,
+        customFields: eventData.customFields || [],
+        branding: eventData.branding
+      };
+      
       setEvent(loadedEvent);
       
-      // Load branding settings
-      const brandingSettings = localDB.getBrandingSettings(eventId);
+      // Load branding settings from event.branding
+      const brandingSettings: BrandingSettings = eventData.branding || {
+        logoUrl: '',
+        headerText: '',
+        primaryColor: '#7C3AED',
+        backgroundColor: '#FFFFFF',
+        fontFamily: 'sans-serif'
+      };
+      
       setBranding(brandingSettings);
       
       console.log('[REGISTRATION] Loaded event:', loadedEvent.name);
@@ -151,9 +171,11 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     setIsSubmitting(true);
     
     try {
-      // Create participant record
-      const participant: localDB.Participant = {
-        id: localDB.generateParticipantId(),
+      // Create participant record with UUID
+      const participantId = `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const participant: any = {
+        id: participantId,
         eventId: eventId,
         name: formData.name,
         email: formData.email,
@@ -165,20 +187,23 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
         customData: formData.customData
       };
       
-      // Save participant
-      localDB.saveParticipant(participant);
+      // Save participant to Supabase
+      const { error } = await supabase
+        .from('participants')
+        .insert([participant]);
+      
+      if (error) {
+        throw new Error(`Failed to register: ${error.message}`);
+      }
       
       console.log('[REGISTRATION] Participant registered:', participant.id);
       
       // Show success modal
       setSuccess(true);
       
-      // Dispatch custom event to notify other components
-      window.dispatchEvent(new Event('participantsUpdated'));
-      
     } catch (err) {
       console.error('[REGISTRATION] Error submitting form:', err);
-      setError('Failed to submit registration. Please try again.');
+      setError(err instanceof Error ? err.message : 'Failed to submit registration. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -464,10 +489,10 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
       </div>
 
       {/* Success Modal */}
-      <Dialog open={success} onOpenChange={(open) => !open && handleCloseSuccessModal()}>
+      <Dialog open={success} onOpenChange={(open: boolean) => !open && handleCloseSuccessModal()}>
         <DialogContent 
           className="sm:max-w-md" 
-          onInteractOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e: any) => e.preventDefault()}
           onEscapeKeyDown={handleCloseSuccessModal}
         >
           <DialogHeader className="text-center">

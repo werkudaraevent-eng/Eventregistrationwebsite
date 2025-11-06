@@ -8,10 +8,8 @@ import { Switch } from './ui/switch';
 import { Checkbox } from './ui/checkbox';
 import { QrCode, Loader2, CheckCircle2, User, Building2, Briefcase, Phone, Mail, Clock, Printer, Camera, X } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
-import * as localDB from '../utils/localStorage';
-
-type Participant = localDB.Participant;
-type AgendaItem = localDB.AgendaItem;
+import localDB from '../utils/localDBStub';
+import type { Participant, AgendaItem } from '../utils/localDBStub';
 
 interface AttendanceScannerProps {
   eventId: string;
@@ -29,7 +27,6 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
   const [lastScanned, setLastScanned] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [displaySettings, setDisplaySettings] = useState({
     name: true,
     company: true,
@@ -75,7 +72,6 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
       console.log('[LOCAL] Fetching agenda from localStorage for event:', eventId);
       const agenda = localDB.getAllAgenda(eventId);
       setAgendaItems(agenda);
-      setLastUpdated(new Date());
     } catch (err: any) {
       console.error('[LOCAL] Error fetching agenda:', err);
     }
@@ -118,7 +114,7 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
             await handleScanAndRecord(decodedText);
           }, 1500);
         },
-        (errorMessage) => {
+        (_errorMessage) => {
           // Error callback - can be ignored for continuous scanning
         }
       );
@@ -150,28 +146,27 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
 
     setIsScanning(true);
     try {
-      // Fetch participant
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/server/make-server-04dd31ce/participant/${code.trim()}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${publicAnonKey}`,
-          },
-        }
-      );
+      // TODO: Fetch participant from Supabase
+      // const response = await fetch(
+      //   `https://${import.meta.env.VITE_SUPABASE_URL}/functions/v1/server/make-server-04dd31ce/participant/${code.trim()}`,
+      //   {
+      //     headers: {
+      //       'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      //     },
+      //   }
+      // );
 
-      const data = await response.json();
+      // const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Participant not found');
-      }
+      // if (!response.ok) {
+      //   throw new Error(data.error || 'Participant not found');
+      // }
 
-      setParticipant(data.participant);
-
+      // setParticipant(data.participant);
       // If agenda is selected, automatically record attendance
-      if (selectedAgenda) {
-        await recordAttendance(data.participant);
-      }
+      // if (selectedAgenda) {
+      //   await recordAttendance(data.participant);
+      // }
     } catch (err: any) {
       console.error('Error scanning QR code:', err);
       alert(err.message || 'Failed to scan QR code. Please try again.');
@@ -586,7 +581,7 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
                 <Checkbox
                   id="display-name"
                   checked={displaySettings.name}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked: boolean | 'indeterminate') => 
                     setDisplaySettings(prev => ({ ...prev, name: checked as boolean }))
                   }
                 />
@@ -598,7 +593,7 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
                 <Checkbox
                   id="display-company"
                   checked={displaySettings.company}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked: boolean | 'indeterminate') => 
                     setDisplaySettings(prev => ({ ...prev, company: checked as boolean }))
                   }
                 />
@@ -606,11 +601,11 @@ export function AttendanceScanner({ eventId }: AttendanceScannerProps) {
                   Show Company
                 </label>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-2">
                 <Checkbox
                   id="display-position"
                   checked={displaySettings.position}
-                  onCheckedChange={(checked) => 
+                  onCheckedChange={(checked: boolean | 'indeterminate') => 
                     setDisplaySettings(prev => ({ ...prev, position: checked as boolean }))
                   }
                 />

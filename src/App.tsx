@@ -6,7 +6,6 @@ import { StandaloneCheckInPage } from './components/StandaloneCheckInPage';
 import { PublicRegistrationForm } from './components/PublicRegistrationForm';
 import { BadgeDesigner } from './components/BadgeDesigner';
 import { supabase } from './utils/supabase/client';
-import * as localDB from './utils/localStorage';
 
 export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -17,9 +16,6 @@ export default function App() {
   const [designerEventId, setDesignerEventId] = useState<string | null>(null);
 
   useEffect(() => {
-    // Run data migration on app load
-    localDB.migrateToMultiEventStructure();
-    
     const urlParams = new URLSearchParams(window.location.search);
     const hash = window.location.hash;
 
@@ -71,15 +67,6 @@ export default function App() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
           setAccessToken(session.access_token);
-          
-          // Check if there's a previously selected event
-          const savedEventId = localDB.getSelectedEventId();
-          if (savedEventId) {
-            const event = localDB.getEventById(savedEventId);
-            if (event) {
-              setSelectedEventId(savedEventId);
-            }
-          }
         }
       } catch (error) {
         console.error('Error checking session:', error);
@@ -121,7 +108,6 @@ export default function App() {
   const handleLogout = () => {
     setAccessToken(null);
     setSelectedEventId(null);
-    localDB.clearSelectedEvent();
   };
 
   const handleEventSelected = (eventId: string) => {

@@ -4,7 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { CheckCircle2, Loader2 } from 'lucide-react';
-import * as localDB from '../utils/localStorage';
+import localDB from '../utils/localDBStub';
 
 export function RegistrationForm() {
   const [formData, setFormData] = useState({
@@ -27,7 +27,7 @@ export function RegistrationForm() {
     try {
       console.log('[LOCAL] Registering participant:', formData);
       
-      const participant: localDB.Participant = {
+      const participant: any = {
         id: localDB.generateParticipantId(),
         name: formData.name,
         email: formData.email,

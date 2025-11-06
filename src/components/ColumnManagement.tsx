@@ -16,12 +16,10 @@ import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { Trash2, Plus, GripVertical, Settings2 } from 'lucide-react';
+import { Trash2, Plus, Settings2 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import * as localDB from '../utils/localStorage';
-
-type CustomField = localDB.CustomField;
-type ColumnVisibility = localDB.ColumnVisibility;
+import localDB from '../utils/localDBStub';
+import type { CustomField, ColumnVisibility } from '../utils/localDBStub';
 
 interface ColumnManagementProps {
   eventId: string;
@@ -79,7 +77,8 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
     }
 
     try {
-      const fieldData = {
+      const fieldData: CustomField = {
+        id: localDB.generateCustomFieldId(),
         name: newField.name.toLowerCase().replace(/\s+/g, '_'),
         label: newField.label,
         type: newField.type,
@@ -207,7 +206,7 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                             <div className="flex items-center justify-center gap-2">
                               <Checkbox
                                 checked={columnVisibility[field.key!]}
-                                onCheckedChange={(checked) => 
+                                onCheckedChange={(checked: boolean | 'indeterminate') => 
                                   handleColumnVisibilityChange(field.key!, checked as boolean)
                                 }
                               />
@@ -347,7 +346,7 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                   <Label htmlFor="field-type">Field Type</Label>
                   <Select
                     value={newField.type}
-                    onValueChange={(value) => setNewField({ ...newField, type: value as CustomField['type'] })}
+                    onValueChange={(value: string) => setNewField({ ...newField, type: value as CustomField['type'] })}
                   >
                     <SelectTrigger id="field-type">
                       <SelectValue />
@@ -379,7 +378,7 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                   <Checkbox
                     id="field-required"
                     checked={newField.required}
-                    onCheckedChange={(checked) => 
+                    onCheckedChange={(checked: boolean | 'indeterminate') => 
                       setNewField({ ...newField, required: checked as boolean })
                     }
                   />

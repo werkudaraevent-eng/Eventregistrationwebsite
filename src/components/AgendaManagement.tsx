@@ -6,12 +6,33 @@ import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Badge } from './ui/badge';
 import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, RefreshCw } from 'lucide-react';
-import * as localDB from '../utils/localStorage';
+import { supabase } from '../utils/supabase/client';
 
-type AgendaItem = localDB.AgendaItem;
-type Participant = localDB.Participant;
+interface AgendaItem {
+  id: string;
+  eventId: string;
+  title: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  createdAt: string;
+  order: number;
+}
+
+interface Participant {
+  id: string;
+  eventId: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  position: string;
+  registeredAt: string;
+  attendance: Array<{ agendaItem: string; timestamp: string }>;
+  customData?: Record<string, any>;
+}
 
 interface AgendaManagementProps {
   eventId: string;
@@ -59,7 +80,6 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
     const spaceBelow = viewportHeight - rect.bottom;
     const spaceAbove = rect.top;
     const dropdownHeight = 150; // Approximate dropdown height
-    const dropdownWidth = 192; // 48 * 4 = 192px (w-48)
 
     const position: { top?: number; bottom?: number; right: number } = {
       right: viewportWidth - rect.right
@@ -78,11 +98,29 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
   const fetchAgenda = async () => {
     setIsLoading(true);
     try {
-      console.log('[LOCAL] Fetching agenda from localStorage for event:', eventId);
-      const agenda = localDB.getAllAgenda(eventId);
-      setAgendaItems(agenda);
+      console.log('[SUPABASE] Fetching agenda from Supabase for event:', eventId);
+      
+      const { data, error } = await supabase
+        .from('agenda_items')
+        .select('*')
+        .eq('eventId', eventId)
+        .order('startTime', { ascending: true });
+      
+      if (error) {
+        throw new Error(`Failed to fetch agenda: ${error.message}`);
+      }
+      
+      console.log('[SUPABASE] Found agenda items:', data?.length);
+      
+      // Add order property if not exists
+      const agendaWithOrder = (data || []).map((item: any, idx: number) => ({
+        ...item,
+        order: idx
+      }));
+      
+      setAgendaItems(agendaWithOrder);
     } catch (err: any) {
-      console.error('[LOCAL] Error fetching agenda:', err);
+      console.error('[SUPABASE] Error fetching agenda:', err);
     } finally {
       setIsLoading(false);
     }
@@ -90,12 +128,22 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
 
   const fetchParticipants = async () => {
     try {
-      console.log('[LOCAL] Fetching participants from localStorage for event:', eventId);
-      const participants = localDB.getAllParticipants(eventId);
-      setParticipants(participants);
+      console.log('[SUPABASE] Fetching participants from Supabase for event:', eventId);
+      
+      const { data, error } = await supabase
+        .from('participants')
+        .select('*')
+        .eq('eventId', eventId);
+      
+      if (error) {
+        throw new Error(`Failed to fetch participants: ${error.message}`);
+      }
+      
+      console.log('[SUPABASE] Found participants:', data?.length);
+      setParticipants(data || []);
       setLastUpdated(new Date());
     } catch (err: any) {
-      console.error('[LOCAL] Error fetching participants:', err);
+      console.error('[SUPABASE] Error fetching participants:', err);
     }
   };
 
@@ -146,33 +194,58 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
     setIsSubmitting(true);
 
     try {
-      console.log('[LOCAL] Saving agenda item:', formData);
+      console.log('[SUPABASE] Saving agenda item:', formData);
       
       if (editingAgenda) {
         // Update existing agenda
-        localDB.updateAgendaItem(editingAgenda.id, formData);
+        const { error } = await supabase
+          .from('agenda_items')
+          .update({
+            title: formData.title,
+            description: formData.description,
+            startTime: formData.startTime,
+            endTime: formData.endTime,
+            location: formData.location
+          })
+          .eq('id', editingAgenda.id);
+        
+        if (error) {
+          throw new Error(`Failed to update agenda item: ${error.message}`);
+        }
+        console.log('[SUPABASE] Agenda item updated successfully');
       } else {
         // Create new agenda
-        const agendaItem: AgendaItem = {
-          id: localDB.generateAgendaId(),
+        const agendaId = `agenda_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        const agendaItem = {
+          id: agendaId,
           eventId: eventId,
           title: formData.title,
           description: formData.description,
           startTime: formData.startTime,
           endTime: formData.endTime,
           location: formData.location,
-          createdAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
         };
-        localDB.saveAgendaItem(agendaItem);
+        
+        const { error } = await supabase
+          .from('agenda_items')
+          .insert([agendaItem]);
+        
+        if (error) {
+          throw new Error(`Failed to create agenda item: ${error.message}`);
+        }
+        console.log('[SUPABASE] Agenda item created successfully');
       }
 
+      alert(editingAgenda ? 'Agenda item updated successfully!' : 'Agenda item created successfully!');
       setFormData({ title: '', description: '', startTime: '', endTime: '', location: '' });
       setEditingAgenda(null);
       setIsDialogOpen(false);
       await fetchAgenda();
     } catch (err: any) {
-      console.error('[LOCAL] Error saving agenda item:', err);
-      alert(editingAgenda ? 'Failed to update agenda item' : 'Failed to create agenda item');
+      console.error('[SUPABASE] Error saving agenda item:', err);
+      alert(err.message || (editingAgenda ? 'Failed to update agenda item' : 'Failed to create agenda item'));
     } finally {
       setIsSubmitting(false);
     }
@@ -204,12 +277,22 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
     }
 
     try {
-      console.log('[LOCAL] Deleting agenda item:', id);
-      localDB.deleteAgendaItem(id);
+      console.log('[SUPABASE] Deleting agenda item:', id);
+      
+      const { error } = await supabase
+        .from('agenda_items')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        throw new Error(`Failed to delete agenda item: ${error.message}`);
+      }
+      
+      alert('Agenda item deleted successfully');
       await fetchAgenda();
     } catch (err: any) {
-      console.error('Error deleting agenda item:', err);
-      alert('Failed to delete agenda item');
+      console.error('[SUPABASE] Error deleting agenda item:', err);
+      alert(err.message || 'Failed to delete agenda item');
     }
   };
 
@@ -420,17 +503,17 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                           </Button>
                           <div className="relative">
                             <Button 
-                              ref={(el) => {
-                                buttonRefs.current[item.id] = el;
+                              ref={(el: HTMLButtonElement | null) => {
+                                if (el) buttonRefs.current[item.id] = el;
                               }}
                               variant="ghost" 
                               size="sm"
                               title="More options"
-                              onClick={(e) => {
+                              onClick={(e: React.MouseEvent) => {
                                 const isOpening = openDropdownId !== item.id;
                                 setOpenDropdownId(isOpening ? item.id : null);
                                 if (isOpening && e.currentTarget) {
-                                  calculateDropdownPosition(e.currentTarget);
+                                  calculateDropdownPosition(e.currentTarget as HTMLElement);
                                 }
                               }}
                             >
@@ -503,7 +586,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
         )}
 
         {/* Participants List Dialog */}
-        <Dialog open={!!selectedAgendaForParticipants} onOpenChange={(open) => !open && setSelectedAgendaForParticipants(null)}>
+        <Dialog open={!!selectedAgendaForParticipants} onOpenChange={(open: boolean) => !open && setSelectedAgendaForParticipants(null)}>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Participants for: {selectedAgendaForParticipants}</DialogTitle>

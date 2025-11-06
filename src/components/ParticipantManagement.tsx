@@ -6,14 +6,41 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
-import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Copy } from 'lucide-react';
+import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2 } from 'lucide-react';
 import { ColumnManagement } from './ColumnManagement';
-import * as localDB from '../utils/localStorage';
-import { toast } from 'sonner@2.0.3';
+import localDB from '../utils/localDBStub';
+import { supabase } from '../utils/supabase/client';
 
-type Participant = localDB.Participant;
-type CustomField = localDB.CustomField;
-type ColumnVisibility = localDB.ColumnVisibility;
+interface Participant {
+  id: string;
+  eventId: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  position: string;
+  registeredAt: string;
+  attendance: Array<{ agendaItem: string; timestamp: string }>;
+  customData?: Record<string, any>;
+}
+
+interface CustomField {
+  id: string;
+  name: string;
+  label: string;
+  type: 'text' | 'email' | 'tel' | 'number' | 'textarea' | 'select';
+  required: boolean;
+  options?: string[];
+  order: number;
+}
+
+interface ColumnVisibility {
+  phone: boolean;
+  company: boolean;
+  position: boolean;
+  attendance: boolean;
+  registered: boolean;
+}
 
 interface ParticipantManagementProps {
   eventId: string;
@@ -50,11 +77,37 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const fetchParticipants = async () => {
     setIsLoading(true);
     try {
-      console.log('[LOCAL] Fetching participants from localStorage for event:', eventId);
-      const participants = localDB.getAllParticipants(eventId);
-      console.log('[LOCAL] Found participants:', participants.length);
-      setParticipants(participants);
-      setFilteredParticipants(participants);
+      console.log('[SUPABASE] Fetching participants from Supabase for event:', eventId);
+      
+      const { data, error } = await supabase
+        .from('participants')
+        .select('*')
+        .eq('eventId', eventId);
+      
+      if (error) {
+        throw new Error(`Failed to fetch participants: ${error.message}`);
+      }
+      
+      console.log('[SUPABASE] Found participants:', data?.length);
+      console.log('[SUPABASE] Raw data:', data);
+      
+      // Data already in camelCase from database
+      const convertedParticipants = (data || []).map((p: any) => ({
+        id: p.id,
+        eventId: p.eventId,
+        name: p.name,
+        email: p.email,
+        phone: p.phone,
+        company: p.company,
+        position: p.position,
+        registeredAt: p.registeredAt,
+        attendance: p.attendance || [],
+        customData: p.customData || {}
+      }));
+      
+      console.log('[SUPABASE] Converted participants:', convertedParticipants);
+      setParticipants(convertedParticipants);
+      setFilteredParticipants(convertedParticipants);
       setLastUpdated(new Date());
       
       // Load custom fields for this event
@@ -69,7 +122,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       const visibility = localDB.getColumnVisibility(eventId);
       setColumnVisibility(visibility);
     } catch (err: any) {
-      console.error('[LOCAL] Error fetching participants:', err);
+      console.error('[SUPABASE] Error fetching participants:', err);
     } finally {
       setIsLoading(false);
     }
@@ -79,36 +132,68 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     fetchParticipants();
   }, [eventId, accessToken]);
 
-  // Auto-refresh: Listen for localStorage changes
+  // Supabase Realtime subscription - smooth real-time updates
   useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      console.log('[PARTICIPANT AUTO-REFRESH] Storage event detected:', e.key);
-      if (e.key === 'event_participants') {
-        console.log('[PARTICIPANT AUTO-REFRESH] Participant data changed, refreshing...');
-        fetchParticipants();
-      }
-    };
-
-    // Custom event listener for same-tab updates (instant)
-    const handleParticipantsUpdated = (e: Event) => {
-      console.log('[PARTICIPANT AUTO-REFRESH] Custom participantsUpdated event detected:', (e as CustomEvent).detail);
-      fetchParticipants();
-    };
-
-    // Listen for changes from other tabs
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('participantsUpdated', handleParticipantsUpdated);
-
-    // Polling mechanism for same-tab updates (every 3 seconds) - fallback
-    const pollInterval = setInterval(() => {
-      console.log('[PARTICIPANT AUTO-REFRESH] Polling for updates...');
-      fetchParticipants();
-    }, 3000);
+    console.log('[REALTIME] Setting up Supabase Realtime subscription for event:', eventId);
+    
+    const subscription = supabase
+      .channel(`participants_${eventId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Listen to all events: INSERT, UPDATE, DELETE
+          schema: 'public',
+          table: 'participants',
+          filter: `eventId=eq.${eventId}`
+        },
+        (payload) => {
+          console.log('[REALTIME] Participant data changed:', payload.eventType);
+          
+          if (payload.eventType === 'INSERT') {
+            const newParticipant = {
+              id: payload.new.id,
+              eventId: payload.new.eventId,
+              name: payload.new.name,
+              email: payload.new.email,
+              phone: payload.new.phone,
+              company: payload.new.company,
+              position: payload.new.position,
+              registeredAt: payload.new.registeredAt,
+              attendance: payload.new.attendance || [],
+              customData: payload.new.customData || {}
+            };
+            setParticipants(prev => [...prev, newParticipant]);
+            setFilteredParticipants(prev => [...prev, newParticipant]);
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedParticipant = {
+              id: payload.new.id,
+              eventId: payload.new.eventId,
+              name: payload.new.name,
+              email: payload.new.email,
+              phone: payload.new.phone,
+              company: payload.new.company,
+              position: payload.new.position,
+              registeredAt: payload.new.registeredAt,
+              attendance: payload.new.attendance || [],
+              customData: payload.new.customData || {}
+            };
+            setParticipants(prev => 
+              prev.map(p => p.id === updatedParticipant.id ? updatedParticipant : p)
+            );
+            setFilteredParticipants(prev =>
+              prev.map(p => p.id === updatedParticipant.id ? updatedParticipant : p)
+            );
+          } else if (payload.eventType === 'DELETE') {
+            setParticipants(prev => prev.filter(p => p.id !== payload.old.id));
+            setFilteredParticipants(prev => prev.filter(p => p.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('participantsUpdated', handleParticipantsUpdated);
-      clearInterval(pollInterval);
+      console.log('[REALTIME] Unsubscribing from Realtime');
+      supabase.removeChannel(subscription);
     };
   }, [eventId]);
 
@@ -127,10 +212,12 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     setIsSubmitting(true);
 
     try {
-      console.log('[LOCAL] Adding participant:', formData);
+      console.log('[SUPABASE] Adding participant:', formData);
       
-      const participant: Participant = {
-        id: localDB.generateParticipantId(),
+      const participantId = `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const participant = {
+        id: participantId,
         eventId: eventId,
         name: formData.name,
         email: formData.email,
@@ -142,19 +229,24 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         customData: formData.customData || {}
       };
       
-      localDB.saveParticipant(participant);
+      const { error } = await supabase
+        .from('participants')
+        .insert([participant]);
       
-      console.log('[LOCAL] Participant added successfully');
-      toast.success('Participant added successfully!');
+      if (error) {
+        throw new Error(`Failed to add participant: ${error.message}`);
+      }
+      
+      console.log('[SUPABASE] Participant added successfully');
+      alert('Participant added successfully!');
       setFormData({ name: '', email: '', phone: '', company: '', position: '', customData: {} });
       setIsAddDialogOpen(false);
       await fetchParticipants();
       
-      // Dispatch event to notify other components
-      window.dispatchEvent(new Event('participantsUpdated'));
+      // Realtime subscription will handle UI updates automatically
     } catch (err: any) {
-      console.error('[LOCAL] Error adding participant:', err);
-      toast.error(err.message || 'Failed to add participant');
+      console.error('[SUPABASE] Error adding participant:', err);
+      alert(err.message || 'Failed to add participant');
     } finally {
       setIsSubmitting(false);
     }
@@ -180,7 +272,13 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
 
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
-        const participant: any = {};
+        const participant: any = {
+          id: `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          eventId: eventId,
+          registeredAt: new Date().toISOString(),
+          attendance: [],
+          customData: {}
+        };
 
         headers.forEach((header, index) => {
           if (header === 'name') participant.name = values[index];
@@ -199,14 +297,21 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         throw new Error('No valid participants found in CSV');
       }
 
-      // Import participants locally
-      console.log('[LOCAL] Bulk importing participants:', participantsToImport.length);
-      const result = localDB.bulkImportParticipants(participantsToImport, eventId);
+      // Import participants to Supabase
+      console.log('[SUPABASE] Bulk importing participants:', participantsToImport.length);
+      
+      const { error } = await supabase
+        .from('participants')
+        .insert(participantsToImport);
+      
+      if (error) {
+        throw new Error(`Failed to import participants: ${error.message}`);
+      }
 
-      alert(`Successfully imported ${result.imported} participants. ${result.failed} failed.`);
+      alert(`Successfully imported ${participantsToImport.length} participants.`);
       await fetchParticipants();
     } catch (err: any) {
-      console.error('[LOCAL] Error importing CSV:', err);
+      console.error('[SUPABASE] Error importing CSV:', err);
       alert(err.message || 'Failed to import CSV');
     } finally {
       setIsImporting(false);
@@ -222,11 +327,19 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     }
 
     try {
-      console.log('[LOCAL] Deleting participant:', id);
-      localDB.deleteParticipant(id);
+      console.log('[SUPABASE] Deleting participant:', id);
+      const { error } = await supabase
+        .from('participants')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        throw new Error(`Failed to delete participant: ${error.message}`);
+      }
+      
       await fetchParticipants();
     } catch (err: any) {
-      console.error('[LOCAL] Error deleting participant:', err);
+      console.error('[SUPABASE] Error deleting participant:', err);
       alert('Failed to delete participant');
     }
   };
@@ -287,9 +400,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const copyRegistrationURL = () => {
     const registrationURL = `${window.location.origin}${window.location.pathname}?register=${eventId}`;
     navigator.clipboard.writeText(registrationURL).then(() => {
-      toast.success('Registration URL copied to clipboard!');
+      alert('Registration URL copied to clipboard!');
     }).catch(() => {
-      toast.error('Failed to copy URL');
+      alert('Failed to copy URL');
     });
   };
 

@@ -1,0 +1,78 @@
+# GitHub Copilot Rules & Constraints
+
+## 🚫 DOCUMENTATION RULES
+
+### DO NOT CREATE DOCUMENTATION UNLESS EXPLICITLY REQUESTED
+
+**Auto-documentation is DISABLED**. Only create `.md` files when user explicitly requests:
+- "create a guide"
+- "document this"
+- "write a README"
+- "create documentation for..."
+- "explain in a document"
+
+### ALLOWED DOCUMENTATION TRIGGERS
+Only create `.md` files when user says:
+- ✅ "create a README"
+- ✅ "write documentation"
+- ✅ "document the architecture"
+- ✅ "create a guide for..."
+- ✅ "explain in a summary"
+
+### BLOCKED DOCUMENTATION TRIGGERS
+Never create `.md` files when:
+- ❌ Task is code changes/refactoring
+- ❌ Task is testing/debugging
+- ❌ Task is feature implementation
+- ❌ Task is bug fixing
+- ❌ No explicit documentation request
+
+## 📋 CODE CHANGE RULES
+
+### WHEN CHANGING CODE
+1. ✅ Modify files only
+2. ✅ Use replace_string_in_file tool
+3. ✅ Be concise and direct
+4. ✅ No auto-generated summaries
+5. ✅ No unnecessary markdown
+
+### WHEN CREATING FILES
+1. ✅ Ask user first if possible
+2. ✅ Only create when necessary
+3. ✅ No companion documentation
+4. ✅ Keep it functional
+
+### WHEN DELETING FILES
+1. ✅ Confirm action
+2. ✅ Use terminal commands
+3. ✅ Report completion
+
+## 🎯 RESPONSE STYLE
+
+### DO
+- ✅ Be brief and direct
+- ✅ Show what was changed
+- ✅ Explain technical details
+- ✅ Ask for clarification if needed
+
+### DON'T
+- ❌ Create documentation without request
+- ❌ Generate lengthy summaries
+- ❌ Make markdown files unless asked
+- ❌ Over-explain obvious changes
+
+## 📝 SUMMARY LIMITS
+
+### When task is complete:
+- **Code changes**: Just list files modified
+- **Bug fixes**: Show what was fixed
+- **Features**: Show implementation
+- **Refactoring**: Show before/after patterns
+
+❌ NO auto-generated completion summaries
+❌ NO auto-generated progress reports
+❌ NO auto-generated documentation
+
+---
+
+**Status**: RULES ACTIVE - Documentation disabled unless explicitly requested

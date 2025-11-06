@@ -1,14 +1,16 @@
+# Setup Supabase Database
+
+## Quick Start: Copy & Paste to Supabase SQL Editor
+
+**⚠️ IMPORTANT: Only run the SQL script below ONCE. It contains ALL tables (events, participants, agenda_items).**
+
+Go to your Supabase project dashboard → SQL Editor → New Query, then copy dan paste seluruh script di bawah ini:
+
+---
+
+```sql
 -- =====================================================
--- Event Registration System - Database Schema
--- =====================================================
--- 
--- This schema creates tables for centralized event management
--- allowing cross-device access to events, participants, and agenda items
---
--- Security Model:
--- - Public read access for standalone pages (registration, check-in)
--- - Event ID-based data isolation
--- - No authentication required for public operations
+-- Event Registration System - Complete Database Setup
 -- =====================================================
 
 -- Enable UUID extension
@@ -37,7 +39,7 @@ CREATE TABLE IF NOT EXISTS events (
     branding JSONB DEFAULT NULL
 );
 
--- Index for faster lookups
+-- Index untuk faster lookups
 CREATE INDEX IF NOT EXISTS idx_events_created_at ON events("createdAt");
 
 -- =====================================================
@@ -57,7 +59,7 @@ CREATE TABLE IF NOT EXISTS participants (
     "customData" JSONB DEFAULT '{}'::jsonb
 );
 
--- Indexes for faster queries
+-- Indexes untuk faster queries
 CREATE INDEX IF NOT EXISTS idx_participants_event_id ON participants("eventId");
 CREATE INDEX IF NOT EXISTS idx_participants_email ON participants(email);
 CREATE INDEX IF NOT EXISTS idx_participants_registered_at ON participants("registeredAt");
@@ -77,7 +79,7 @@ CREATE TABLE IF NOT EXISTS agenda_items (
     "createdAt" TEXT NOT NULL
 );
 
--- Indexes for faster queries
+-- Indexes untuk faster queries
 CREATE INDEX IF NOT EXISTS idx_agenda_items_event_id ON agenda_items("eventId");
 CREATE INDEX IF NOT EXISTS idx_agenda_items_start_time ON agenda_items("startTime");
 
@@ -90,7 +92,16 @@ ALTER TABLE events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE participants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agenda_items ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if they exist
+-- =====================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- =====================================================
+
+-- Enable RLS on all tables
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agenda_items ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist (idempotent)
 DROP POLICY IF EXISTS "Public read access for events" ON events;
 DROP POLICY IF EXISTS "Public read access for participants" ON participants;
 DROP POLICY IF EXISTS "Public read access for agenda_items" ON agenda_items;
@@ -100,7 +111,7 @@ DROP POLICY IF EXISTS "Public manage events" ON events;
 DROP POLICY IF EXISTS "Public manage agenda_items" ON agenda_items;
 DROP POLICY IF EXISTS "Public delete participants" ON participants;
 
--- Public read access for all tables (needed for standalone pages)
+-- Public read access for all tables
 CREATE POLICY "Public read access for events"
     ON events FOR SELECT
     USING (true);
@@ -123,50 +134,101 @@ CREATE POLICY "Public update access for participants"
     ON participants FOR UPDATE
     USING (true);
 
--- Authenticated users can manage events (for admin dashboard)
--- Note: This requires authentication which can be added later
--- For now, we'll allow public access for demo purposes
-
+-- Public manage events
 CREATE POLICY "Public manage events"
     ON events FOR ALL
     USING (true);
 
+-- Public manage agenda_items
 CREATE POLICY "Public manage agenda_items"
     ON agenda_items FOR ALL
     USING (true);
 
+-- Public delete participants
 CREATE POLICY "Public delete participants"
     ON participants FOR DELETE
     USING (true);
+```
 
--- =====================================================
--- HELPER FUNCTIONS
--- =====================================================
+---
 
--- Function to clean up old events (optional, for maintenance)
-CREATE OR REPLACE FUNCTION cleanup_old_events(days_old INTEGER DEFAULT 90)
-RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    DELETE FROM events
-    WHERE "createdAt" < (NOW() - INTERVAL '1 day' * days_old)::TEXT
-    RETURNING count(*) INTO deleted_count;
-    
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+## Steps to Execute:
 
--- =====================================================
--- COMMENTS FOR DOCUMENTATION
--- =====================================================
+1. **Login to Supabase** → Project Dashboard
+2. **Go to SQL Editor** (left sidebar)
+3. **Click "New Query"**
+4. **Paste entire SQL script above**
+5. **Click "Run"** (green play button)
+6. **Verify tables created** → Go to Database → Tables section
 
-COMMENT ON TABLE events IS 'Stores event information with custom fields and branding settings';
-COMMENT ON TABLE participants IS 'Stores participant registrations linked to specific events';
-COMMENT ON TABLE agenda_items IS 'Stores agenda/session items for events';
+## Verify Tables Were Created:
 
-COMMENT ON COLUMN events."customFields" IS 'JSON array of custom registration fields';
-COMMENT ON COLUMN events."columnVisibility" IS 'JSON object defining which columns are visible in participant table';
-COMMENT ON COLUMN events.branding IS 'JSON object containing registration page branding settings';
-COMMENT ON COLUMN participants.attendance IS 'JSON array of check-in records for agenda items';
-COMMENT ON COLUMN participants."customData" IS 'JSON object storing custom field values';
+You should see these tables:
+- ✅ `events`
+- ✅ `participants`
+- ✅ `agenda_items`
+
+## Environment Configuration
+
+Make sure your `.env.local` has:
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key-here
+```
+
+You can find these in Supabase → Project Settings → API
+
+## Testing the Setup
+
+1. **Create Event**: Go to http://localhost:3001 → Create Event (makan, 06/11/2025, 20/11/2025, jkt, jkt)
+2. **Add Participant**: Click on event → Participants tab → "Add Participant"
+3. **Check Console**: Should see `[SUPABASE] Adding participant` log message
+4. **Verify**: Participant should appear in table
+
+## Troubleshooting
+
+### Error: "relation 'events' does not exist"
+→ SQL script hasn't been executed. Go to Supabase SQL Editor and run the script above.
+
+### Error: "null value in column 'startDate' violates not-null constraint"
+→ Database already created but with different schema. Drop tables and run script again:
+
+```sql
+DROP TABLE IF EXISTS agenda_items CASCADE;
+DROP TABLE IF EXISTS participants CASCADE;
+DROP TABLE IF EXISTS events CASCADE;
+```
+
+Then run the full script above.
+
+### Error: "RLS violation"
+→ RLS policies need to be updated. Re-run the RLS section above.
+
+### Error: "column participants.event_id does not exist"
+→ Column name mismatch! Database uses camelCase: `eventId` (not `event_id`)
+→ Code has been updated to use correct camelCase column names
+→ Make sure you're running the latest ParticipantManagement.tsx code
+
+## Data Flow
+
+```
+Event Creation (EventSelection.tsx)
+    ↓ INSERT into events table
+    ↓
+Event Displayed
+    ↓
+User Adds Participant (ParticipantManagement.tsx)
+    ↓ INSERT into participants table
+    ↓
+Participant Appears in Table
+```
+
+## Column Naming Convention
+
+Database uses camelCase (same as TypeScript) for this project:
+- `startDate`, `endDate` (not snake_case)
+- `eventId`, `registeredAt`
+- `customData`, `customFields`
+
+This matches the Supabase migration file exactly.

@@ -6,7 +6,6 @@ import { AgendaManagement } from './AgendaManagement';
 import { BrandingSettings } from './BrandingSettings';
 import { LogOut, Users, Calendar, ArrowLeft, Palette } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
-import * as localDB from '../utils/localStorage';
 
 interface AdminDashboardProps {
   eventId: string;
@@ -15,22 +14,49 @@ interface AdminDashboardProps {
   onBackToEvents: () => void;
 }
 
+interface Event {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  description: string;
+  createdAt: string;
+}
+
 export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents }: AdminDashboardProps) {
-  const [event, setEvent] = useState<localDB.Event | null>(null);
+  const [event, setEvent] = useState<Event | null>(null);
 
   useEffect(() => {
-    const loadedEvent = localDB.getEventById(eventId);
-    setEvent(loadedEvent);
+    const loadEvent = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('events')
+          .select('*')
+          .eq('id', eventId)
+          .single();
+
+        if (error) {
+          console.error('Error loading event:', error);
+        } else {
+          setEvent(data);
+        }
+      } catch (error) {
+        console.error('Error loading event:', error);
+      }
+    };
+
+    if (eventId) {
+      loadEvent();
+    }
   }, [eventId]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    localDB.clearSelectedEvent();
     onLogout();
   };
 
   const handleBackToEvents = () => {
-    localDB.clearSelectedEvent();
     onBackToEvents();
   };
 

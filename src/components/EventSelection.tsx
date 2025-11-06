@@ -1,18 +1,22 @@
 import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Plus, Calendar, MapPin, Edit, Trash2, LogOut, ArrowRight, CalendarDays } from 'lucide-react';
-import * as localDB from '../utils/localStorage';
 import { supabase } from '../utils/supabase/client';
-import { MigrationNotice } from './MigrationNotice';
-import { DataMigrationDialog } from './DataMigrationDialog';
 
-type Event = localDB.Event;
+interface Event {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  description: string;
+  createdAt: string;
+}
 
 interface EventSelectionProps {
   onEventSelected: (eventId: string) => void;
@@ -23,7 +27,6 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
   const [events, setEvents] = useState<Event[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
-  const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [editingEvent, setEditingEvent] = useState<Event | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -37,9 +40,21 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
     loadEvents();
   }, []);
 
-  const loadEvents = () => {
-    const allEvents = localDB.getAllEvents();
-    setEvents(allEvents);
+  const loadEvents = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('createdAt', { ascending: false });
+
+      if (error) {
+        console.error('Error loading events:', error);
+      } else {
+        setEvents(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading events:', error);
+    }
   };
 
   const handleCreateEvent = () => {
@@ -65,28 +80,44 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
     setShowEditDialog(true);
   };
 
-  const handleSubmitCreate = () => {
+  const handleSubmitCreate = async () => {
     if (!formData.name || !formData.startDate) {
       alert('Please fill in required fields (Event Name and Start Date)');
       return;
     }
 
-    const newEvent: Event = {
-      id: localDB.generateEventId(),
-      name: formData.name,
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      location: formData.location,
-      description: formData.description,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      // Generate UUID for new event
+      const eventId = `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const { error } = await supabase
+        .from('events')
+        .insert([
+          {
+            id: eventId,
+            name: formData.name,
+            startDate: formData.startDate,
+            endDate: formData.endDate || null,
+            location: formData.location,
+            description: formData.description,
+            createdAt: new Date().toISOString(),
+          }
+        ]);
 
-    localDB.saveEvent(newEvent);
-    loadEvents();
-    setShowCreateDialog(false);
+      if (error) {
+        console.error('Error creating event:', error);
+        alert('Failed to create event');
+      } else {
+        loadEvents();
+        setShowCreateDialog(false);
+      }
+    } catch (error) {
+      console.error('Error creating event:', error);
+      alert('Failed to create event');
+    }
   };
 
-  const handleSubmitEdit = () => {
+  const handleSubmitEdit = async () => {
     if (!editingEvent) return;
     
     if (!formData.name || !formData.startDate) {
@@ -94,28 +125,54 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
       return;
     }
 
-    localDB.updateEvent(editingEvent.id, {
-      name: formData.name,
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      location: formData.location,
-      description: formData.description,
-    });
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({
+          name: formData.name,
+          startDate: formData.startDate,
+          endDate: formData.endDate || null,
+          location: formData.location,
+          description: formData.description,
+        })
+        .eq('id', editingEvent.id);
 
-    loadEvents();
-    setShowEditDialog(false);
-    setEditingEvent(null);
+      if (error) {
+        console.error('Error updating event:', error);
+        alert('Failed to update event');
+      } else {
+        loadEvents();
+        setShowEditDialog(false);
+        setEditingEvent(null);
+      }
+    } catch (error) {
+      console.error('Error updating event:', error);
+      alert('Failed to update event');
+    }
   };
 
-  const handleDeleteEvent = (eventId: string, eventName: string) => {
+  const handleDeleteEvent = async (eventId: string, eventName: string) => {
     if (confirm(`Are you sure you want to delete "${eventName}"?\n\nThis will permanently delete all participants, agenda items, and attendance records associated with this event.`)) {
-      localDB.deleteEvent(eventId);
-      loadEvents();
+      try {
+        const { error } = await supabase
+          .from('events')
+          .delete()
+          .eq('id', eventId);
+
+        if (error) {
+          console.error('Error deleting event:', error);
+          alert('Failed to delete event');
+        } else {
+          loadEvents();
+        }
+      } catch (error) {
+        console.error('Error deleting event:', error);
+        alert('Failed to delete event');
+      }
     }
   };
 
   const handleSelectEvent = (eventId: string) => {
-    localDB.setSelectedEvent(eventId);
     onEventSelected(eventId);
   };
 
@@ -152,11 +209,6 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
 
       <main className="container mx-auto px-6 py-12">
         <div className="max-w-7xl mx-auto">
-          {/* Migration Notice */}
-          <div className="mb-8">
-            <MigrationNotice onMigrateClick={() => setShowMigrationDialog(true)} />
-          </div>
-          
           <div className="flex items-center justify-between mb-10">
             <div>
               <h2 className="text-3xl mb-2">Your Events</h2>
@@ -190,9 +242,6 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {events.map((event) => {
-                const participants = localDB.getAllParticipants(event.id);
-                const agendaItems = localDB.getAllAgenda(event.id);
-                
                 return (
                   <Card key={event.id} className="card-elevated bg-white border-0 overflow-hidden group">
                     <div className="h-2 gradient-primary"></div>
@@ -221,17 +270,6 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                         </p>
                       )}
                       
-                      <div className="grid grid-cols-2 gap-3 mb-5">
-                        <div className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-4 text-center border border-purple-200">
-                          <div className="text-2xl bg-gradient-to-r from-purple-600 to-purple-700 bg-clip-text text-transparent">{participants.length}</div>
-                          <div className="text-xs text-purple-700 mt-1">Participants</div>
-                        </div>
-                        <div className="bg-gradient-to-br from-pink-50 to-pink-100 rounded-xl p-4 text-center border border-pink-200">
-                          <div className="text-2xl bg-gradient-to-r from-pink-600 to-pink-700 bg-clip-text text-transparent">{agendaItems.length}</div>
-                          <div className="text-xs text-pink-700 mt-1">Sessions</div>
-                        </div>
-                      </div>
-
                       <div className="flex gap-2">
                         <Button 
                           onClick={() => handleSelectEvent(event.id)}
@@ -271,6 +309,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Create New Event</DialogTitle>
+            <DialogDescription>Create a new event to manage participants and agenda</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
@@ -341,6 +380,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Event</DialogTitle>
+            <DialogDescription>Update event details</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
@@ -405,12 +445,6 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Data Migration Dialog */}
-      <DataMigrationDialog 
-        open={showMigrationDialog}
-        onOpenChange={setShowMigrationDialog}
-      />
     </div>
   );
 }

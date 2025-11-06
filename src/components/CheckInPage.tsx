@@ -1,15 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Card, CardContent } from './ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Search, QrCode, BarChart3, ArrowLeft, Loader2, CheckCircle2, X, Camera, Clock } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
-import * as localDB from '../utils/localStorage';
-
-type AgendaItem = localDB.AgendaItem;
-type Participant = localDB.Participant;
+import localDB from '../utils/localDBStub';
+import type { AgendaItem, Participant } from '../utils/localDBStub';
 
 interface CheckInPageProps {
   agenda: AgendaItem;
@@ -24,7 +21,6 @@ export function CheckInPage({ agenda, onBack }: CheckInPageProps) {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [searchResults, setSearchResults] = useState<Participant[]>([]);
   const [checkedInParticipants, setCheckedInParticipants] = useState<Participant[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [scanSuccess, setScanSuccess] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -39,26 +35,19 @@ export function CheckInPage({ agenda, onBack }: CheckInPageProps) {
   }, []);
 
   const fetchParticipants = async () => {
-    setIsLoading(true);
     try {
       console.log('[LOCAL] Fetching participants from localStorage');
       const allParticipants = localDB.getAllParticipants();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch participants');
-      }
 
-      setParticipants(data.participants || []);
+      setParticipants(allParticipants || []);
       
       // Filter checked-in participants for this agenda
-      const checkedIn = (data.participants || []).filter((p: Participant) =>
-        p.attendance && p.attendance.some(a => a.agendaItem === agenda.title)
+      const checkedIn = (allParticipants || []).filter((p: Participant) =>
+        p.attendance && p.attendance.some((a: { agendaItem: string; timestamp: string }) => a.agendaItem === agenda.title)
       );
       setCheckedInParticipants(checkedIn);
     } catch (err: any) {
       console.error('Error fetching participants:', err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -125,7 +114,7 @@ export function CheckInPage({ agenda, onBack }: CheckInPageProps) {
             await handleCheckIn(decodedText);
           }, 1500);
         },
-        (errorMessage) => {
+        (_errorMessage) => {
           // Error callback - can be ignored for continuous scanning
         }
       );
@@ -350,7 +339,7 @@ export function CheckInPage({ agenda, onBack }: CheckInPageProps) {
       </Dialog>
 
       {/* QR Scan Dialog */}
-      <Dialog open={showScanDialog} onOpenChange={(open) => !open && closeScanDialog()}>
+      <Dialog open={showScanDialog} onOpenChange={(open: boolean) => !open && closeScanDialog()}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Scan QR Code</DialogTitle>

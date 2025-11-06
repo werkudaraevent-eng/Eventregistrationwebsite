@@ -1,0 +1,42 @@
+{
+  "copilot": {
+    "rules": {
+      "auto_documentation": false,
+      "auto_summaries": false,
+      "auto_comments": false,
+      "documentation_only_on_request": true
+    },
+    "documentation": {
+      "enabled": false,
+      "require_explicit_request": true,
+      "triggers": [
+        "create a guide",
+        "write documentation",
+        "document this",
+        "create a readme",
+        "explain in a document",
+        "write a summary",
+        "create documentation"
+      ]
+    },
+    "code_style": {
+      "be_concise": true,
+      "no_unnecessary_markdown": true,
+      "no_auto_summaries": true,
+      "show_only_changes": true
+    },
+    "response_format": {
+      "use_markdown": false,
+      "use_lists": false,
+      "use_tables": false,
+      "keep_it_simple": true
+    },
+    "blocked_actions": [
+      "auto_generate_documentation",
+      "auto_generate_summaries",
+      "auto_generate_progress_reports",
+      "auto_generate_changelogs",
+      "create_unnecessary_files"
+    ]
+  }
+}
