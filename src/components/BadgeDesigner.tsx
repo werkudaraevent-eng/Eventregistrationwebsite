@@ -1,4 +1,4 @@
-/**
+﻿/**
  * BadgeDesigner - Advanced Drag-and-Drop Badge Customization Interface
  * 
  * Features:
@@ -10,23 +10,19 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
-import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Resizable } from 're-resizable';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
-import { Separator } from './ui/separator';
 import { 
   Save, QrCode, Image as ImageIcon, Type, CheckCircle2, 
-  Plus, Trash2, Maximize2, AlignLeft, AlignCenter, AlignRight,
-  Bold, Italic, Palette, Move, Upload
+  Plus, Trash2, AlignLeft, AlignCenter, AlignRight,
+  Bold, Italic, Move, Upload, Minus
 } from 'lucide-react';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import QRCodeLib from 'qrcode';
 import * as localDB from '../utils/localStorage';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
@@ -38,8 +34,7 @@ type CustomField = localDB.CustomField;
 
 interface BadgeDesignerProps {
   eventId: string;
-  isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
 }
 
 // Extended component interface for canvas positioning
@@ -75,15 +70,11 @@ const BADGE_SIZES = {
 
 const CANVAS_SCALE = 3.5; // Pixel scale factor for better visibility
 
-export function BadgeDesigner({ eventId, isOpen, onClose }: BadgeDesignerProps) {
-  return (
-    <DndProvider backend={HTML5Backend}>
-      <BadgeDesignerContent eventId={eventId} isOpen={isOpen} onClose={onClose} />
-    </DndProvider>
-  );
+export function BadgeDesigner({ eventId, onClose }: BadgeDesignerProps) {
+  return <BadgeDesignerContent eventId={eventId} onClose={onClose} />;
 }
 
-function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) {
+function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const [settings, setSettings] = useState<BadgeSettings | null>(null);
   const [event, setEvent] = useState<Event | null>(null);
   const [availableFields, setAvailableFields] = useState<Array<{ name: string; label: string }>>([]);
@@ -92,33 +83,62 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isUploadingBg, setIsUploadingBg] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  const handleClose = () => {
+    if (onClose) {
+      onClose();
+    } else {
+      window.history.back();
+    }
+  };
 
   useEffect(() => {
-    if (isOpen && eventId) {
+    if (eventId) {
       loadSettings();
       loadEvent();
     }
-  }, [isOpen, eventId]);
+  }, [eventId]);
+
+  const ensureReadableColor = (value?: string): string => {
+    if (!value) return '#000000';
+    const normalized = value.trim().toLowerCase();
+    if (normalized === '#fff' || normalized === '#ffffff' || normalized === 'white') {
+      return '#000000';
+    }
+    return value;
+  };
+
+  const normalizeComponent = (component: any): CanvasComponent => ({
+    ...component,
+    fontSize: component.fontSize ?? 16,
+    fontFamily: component.fontFamily ?? 'sans-serif',
+    fontWeight: component.fontWeight ?? 'normal',
+    fontStyle: component.fontStyle ?? 'normal',
+    textAlign: component.textAlign ?? 'center',
+    color: ensureReadableColor(component.color)
+  });
 
   const loadSettings = () => {
-    const badgeSettings = localDB.getBadgeSettings(eventId);
-    setSettings(badgeSettings);
+    const storedSettings = localDB.getBadgeSettings(eventId);
+    const normalizedSettings = {
+      ...storedSettings,
+      backgroundColor: storedSettings.backgroundColor || '#f3f4f6'
+    };
+    setSettings(normalizedSettings);
     
-    // Try to load existing canvas layout
     const canvasLayoutStr = localStorage.getItem(`badge_canvas_${eventId}`);
     
     if (canvasLayoutStr) {
-      // Load saved canvas layout
       try {
         const savedLayout = JSON.parse(canvasLayoutStr);
-        setCanvasComponents(savedLayout);
+        setCanvasComponents(savedLayout.map((component: CanvasComponent) => normalizeComponent(component)));
       } catch (err) {
         console.error('Error loading canvas layout:', err);
-        convertOldComponents(badgeSettings);
+        convertOldComponents(normalizedSettings);
       }
     } else {
-      // Convert old components to canvas components
-      convertOldComponents(badgeSettings);
+      convertOldComponents(normalizedSettings);
     }
   };
 
@@ -135,8 +155,8 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
         fontWeight: 'normal' as const,
         fontStyle: 'normal' as const,
         textAlign: 'center' as const,
-        color: '#000000'
-      }));
+      color: '#000000'
+      })).map(normalizeComponent);
       setCanvasComponents(converted);
     }
   };
@@ -206,9 +226,33 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
     setSettings({ ...settings, ...updates });
   };
 
-  const handleComponentDrop = (componentType: string, fieldName?: string, label?: string) => {
-    console.log('handleComponentDrop called:', { componentType, fieldName, label });
-    
+  const addComponentToCanvas = (
+    componentType: string,
+    clientX?: number,
+    clientY?: number,
+    fieldName?: string,
+    label?: string
+  ) => {
+    if (!canvasWidth || !canvasHeight) {
+      console.warn('Canvas dimensions not ready; skipping component add.');
+      return;
+    }
+
+    const dropX = clientX ?? canvasWidth / 2;
+    const dropY = clientY ?? canvasHeight / 2;
+
+    const componentWidth = componentType === 'qrcode' ? 25 : 60;
+    const componentHeight = componentType === 'qrcode' ? 25 : 12;
+
+    const xPercent = Math.max(
+      0,
+      Math.min(100 - componentWidth, (dropX / canvasWidth) * 100)
+    );
+    const yPercent = Math.max(
+      0,
+      Math.min(100 - componentHeight, (dropY / canvasHeight) * 100)
+    );
+
     const newComponent: CanvasComponent = {
       id: Date.now().toString(),
       type: componentType as any,
@@ -216,10 +260,10 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
       label: label || componentType,
       enabled: true,
       order: canvasComponents.length,
-      x: 20,
-      y: 20,
-      width: componentType === 'qrcode' ? 25 : 60,
-      height: componentType === 'qrcode' ? 25 : 12,
+      x: xPercent,
+      y: yPercent,
+      width: componentWidth,
+      height: componentHeight,
       fontSize: 16,
       fontFamily: 'sans-serif',
       fontWeight: 'normal',
@@ -227,20 +271,31 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
       textAlign: 'center',
       color: '#000000'
     };
-    
-    setCanvasComponents(prev => {
-      const updated = [...prev, newComponent];
-      console.log('Canvas components updated:', updated.length);
-      return updated;
-    });
-    setSelectedComponentId(newComponent.id);
-    console.log('Component added and selected:', newComponent.id);
+
+    const normalized = normalizeComponent(newComponent);
+    setCanvasComponents(prev => [...prev, normalized]);
+    setSelectedComponentId(normalized.id);
   };
 
   const updateComponent = (id: string, updates: Partial<CanvasComponent>) => {
     setCanvasComponents(prev =>
       prev.map(c => c.id === id ? { ...c, ...updates } : c)
     );
+  };
+
+  const handlePaletteAdd = (componentType: string, fieldName?: string, label?: string) => {
+    addComponentToCanvas(componentType, canvasWidth / 2, canvasHeight / 2, fieldName, label);
+  };
+
+  const clampZoom = (value: number) => Math.min(2, Math.max(0.5, value));
+
+  const applyZoom = (value: number) => {
+    const clamped = parseFloat(clampZoom(value).toFixed(2));
+    setZoomLevel(clamped);
+  };
+
+  const incrementZoom = (delta: number) => {
+    applyZoom(zoomLevel + delta);
   };
 
   const deleteComponent = (id: string) => {
@@ -319,240 +374,324 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
   const selectedComponent = canvasComponents.find(c => c.id === selectedComponentId);
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-[92vw] max-h-[92vh] w-full overflow-hidden p-0">
-        <div className="flex flex-col h-[92vh]">
-          <DialogHeader className="px-6 pt-6 pb-4 border-b bg-gradient-to-r from-white to-gray-50">
-            <DialogTitle className="flex items-center gap-2">
-              <Type className="h-5 w-5 text-purple-600" />
-              Badge Designer - {event.name}
-            </DialogTitle>
-            <DialogDescription>
-              Drag components onto the canvas and customize their appearance
-            </DialogDescription>
-          </DialogHeader>
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white overflow-hidden">
+      <header className="flex-shrink-0 px-10 py-6 border-b border-white/15 bg-white/10 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-3">
+              <Type className="h-6 w-6 text-purple-300" />
+              Badge Designer – {event.name}
+            </h1>
+            <p className="text-sm text-white/70 mt-1">
+              Click palette items to add them to the badge and customize their appearance in real time.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={handleClose}
+              className="h-10 px-5 border-white/40 text-white bg-white/10 hover:bg-white/20 hover:text-white"
+            >
+              Exit Designer
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="h-10 px-6 bg-gradient-to-r from-purple-500 via-fuchsia-500 to-indigo-500 hover:from-purple-500/90 hover:to-indigo-500/90 text-white border-none"
+            >
+              {isSaving ? (
+                <>Saving…</>
+              ) : saveSuccess ? (
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Saved!
+                </>
+              ) : (
+                <>
+                  <Save className="mr-2 h-4 w-4" />
+                  Save Template
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </header>
 
-          <div className="grid grid-cols-[240px_1fr_280px] gap-0 flex-1 overflow-hidden">
+      <main className="flex-1 min-h-0 px-10 py-8 overflow-hidden">
+        <div className="mx-auto flex h-full min-h-0 max-w-[1600px] gap-6">
           {/* Left Sidebar - Component Palette */}
-          <div className="border-r bg-gray-50/50 overflow-y-auto">
-            <div className="p-4 space-y-3">
-              <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-3 py-2 border-b bg-gradient-to-r from-purple-50 to-blue-50">
-                  <h3 className="text-xs font-semibold text-gray-700">Badge Size</h3>
-                </div>
-                <div className="p-3 space-y-2">
-                  <RadioGroup
-                    value={settings.size}
-                    onValueChange={(value) => updateSettings({ size: value as any })}
-                    className="space-y-1.5"
-                  >
-                    {Object.entries(BADGE_SIZES).map(([key, { label }]) => (
-                      <div key={key} className="flex items-center space-x-2">
-                        <RadioGroupItem value={key} id={`size-${key}`} />
-                        <Label htmlFor={`size-${key}`} className="cursor-pointer text-xs">
-                          {label}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-
-                  {settings.size === 'custom' && (
-                    <div className="grid grid-cols-2 gap-2 pt-2">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Width (mm)</Label>
-                        <Input
-                          type="number"
-                          value={settings.customWidth || 100}
-                          onChange={(e) => updateSettings({ customWidth: parseInt(e.target.value) })}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Height (mm)</Label>
-                        <Input
-                          type="number"
-                          value={settings.customHeight || 150}
-                          onChange={(e) => updateSettings({ customHeight: parseInt(e.target.value) })}
-                          className="h-7 text-xs"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="text-xs text-purple-600 font-medium pt-1">
-                    {width.toFixed(1)}mm × {height.toFixed(1)}mm
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-3 py-2 border-b bg-gradient-to-r from-purple-50 to-blue-50">
-                  <h3 className="text-xs font-semibold text-gray-700">Component Palette</h3>
-                </div>
-                <div className="p-3 space-y-1.5">
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Drag components to canvas
-                  </p>
-
-                  <DraggableComponent type="eventName" label="Event Name">
-                    <Type className="h-3.5 w-3.5 mr-2" />
-                    <span className="text-xs">Event Name</span>
-                  </DraggableComponent>
-
-                  <DraggableComponent type="qrcode" label="QR Code">
-                    <QrCode className="h-3.5 w-3.5 mr-2" />
-                    <span className="text-xs">QR Code</span>
-                  </DraggableComponent>
-
-                  <DraggableComponent type="logo" label="Event Logo">
-                    <ImageIcon className="h-3.5 w-3.5 mr-2" />
-                    <span className="text-xs">Event Logo</span>
-                  </DraggableComponent>
-
-                  <div className="my-2 border-t"></div>
-                  
-                  <p className="text-xs text-gray-600 mb-1.5 font-medium">Participant Fields</p>
-                  {availableFields.map(field => (
-                    <DraggableComponent
-                      key={field.name}
-                      type="field"
-                      fieldName={field.name}
-                      label={field.label}
-                    >
-                      <Type className="h-3 w-3 mr-2" />
-                      <span className="text-xs">{field.label}</span>
-                    </DraggableComponent>
-                  ))}
-
-                  <div className="my-2 border-t"></div>
-                  
-                  <DraggableComponent type="customText" label="Custom Text">
-                    <Type className="h-3.5 w-3.5 mr-2" />
-                    <span className="text-xs">Custom Text</span>
-                  </DraggableComponent>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg border shadow-sm">
-                <div className="px-3 py-2 border-b bg-gradient-to-r from-purple-50 to-blue-50">
-                  <h3 className="text-xs font-semibold text-gray-700">Background</h3>
-                </div>
-                <div className="p-3 space-y-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs font-medium">Background Color</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="color"
-                        value={settings.backgroundColor}
-                        onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                        className="w-10 h-7 p-1"
-                      />
-                      <Input
-                        type="text"
-                        value={settings.backgroundColor}
-                        onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                        placeholder="#ffffff"
-                        className="h-7 text-xs flex-1"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="border-t pt-2"></div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium">Background Image</Label>
-                    
-                    {/* File Upload Button */}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isUploadingBg}
-                        className="h-8 text-xs flex-1 relative overflow-hidden"
-                        onClick={() => document.getElementById('bg-file-input')?.click()}
+          <section className="flex h-full min-h-0 w-[280px] flex-shrink-0 basis-[280px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-xl">
+            <div className="flex h-full flex-col gap-4 p-4">
+              <Accordion type="multiple" defaultValue={['size', 'palette']} className="flex flex-col gap-4">
+                <AccordionItem value="size" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
+                    Badge Size
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    <div className="space-y-3">
+                      <RadioGroup
+                        value={settings.size}
+                        onValueChange={(value) => updateSettings({ size: value as any })}
+                        className="space-y-2"
                       >
-                        <Upload className="h-3.5 w-3.5 mr-2" />
-                        {isUploadingBg ? 'Uploading...' : 'Upload Image'}
-                      </Button>
-                      <input
-                        id="bg-file-input"
-                        type="file"
-                        accept="image/png,image/jpeg,image/jpg"
-                        onChange={handleBackgroundImageUpload}
-                        className="hidden"
-                      />
-                    </div>
-                    
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
-                      </div>
-                      <div className="relative flex justify-center text-xs">
-                        <span className="bg-white px-2 text-muted-foreground">or use URL</span>
-                      </div>
-                    </div>
-                    
-                    <Input
-                      type="url"
-                      value={settings.backgroundImageUrl || ''}
-                      onChange={(e) => updateSettings({ backgroundImageUrl: e.target.value })}
-                      placeholder="https://example.com/image.jpg"
-                      className="h-7 text-xs"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Upload a local file or paste image URL
-                    </p>
-
-                    {settings.backgroundImageUrl && (
-                      <>
-                        <div className="space-y-1 pt-1">
-                          <Label className="text-xs">Image Fit</Label>
-                          <Select
-                            value={settings.backgroundImageFit || 'cover'}
-                            onValueChange={(value: 'cover' | 'contain') => updateSettings({ backgroundImageFit: value })}
+                        {Object.entries(BADGE_SIZES).map(([key, { label }]) => (
+                          <label
+                            key={key}
+                            htmlFor={`size-${key}`}
+                            className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:border-purple-400 hover:bg-purple-50/50 transition-colors cursor-pointer"
                           >
-                            <SelectTrigger className="h-7 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="cover">Cover (Fill badge)</SelectItem>
-                              <SelectItem value="contain">Contain (Fit within)</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                            <RadioGroupItem value={key} id={`size-${key}`} />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </RadioGroup>
 
-                        <div className="mt-2 border rounded-md p-2 bg-gray-50">
-                          <p className="text-xs text-muted-foreground mb-1">Preview:</p>
-                          <img 
-                            src={settings.backgroundImageUrl} 
-                            alt="Background preview"
-                            className="w-full h-20 object-cover rounded"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
+                      {settings.size === 'custom' && (
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-600">Width (mm)</Label>
+                            <Input
+                              type="number"
+                              value={settings.customWidth || 100}
+                              onChange={(e) => updateSettings({ customWidth: parseInt(e.target.value) })}
+                              className="h-9 text-sm"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-600">Height (mm)</Label>
+                            <Input
+                              type="number"
+                              value={settings.customHeight || 150}
+                              onChange={(e) => updateSettings({ customHeight: parseInt(e.target.value) })}
+                              className="h-9 text-sm"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-xs font-semibold text-purple-600 bg-purple-50 rounded-lg px-3 py-2">
+                        Preview size: {width.toFixed(1)}mm × {height.toFixed(1)}mm
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="palette" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
+                    Component Palette
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-500">
+                        Click a component to drop it onto the badge canvas.
+                      </p>
+
+                      <PaletteItem type="eventName" label="Event Name" onAdd={handlePaletteAdd}>
+                        <Type className="h-3.5 w-3.5 mr-2 text-purple-500" />
+                        <span className="text-sm">Event Name</span>
+                      </PaletteItem>
+
+                      <PaletteItem type="qrcode" label="QR Code" onAdd={handlePaletteAdd}>
+                        <QrCode className="h-3.5 w-3.5 mr-2 text-purple-500" />
+                        <span className="text-sm">QR Code</span>
+                      </PaletteItem>
+
+                      <PaletteItem type="logo" label="Event Logo" onAdd={handlePaletteAdd}>
+                        <ImageIcon className="h-3.5 w-3.5 mr-2 text-purple-500" />
+                        <span className="text-sm">Event Logo</span>
+                      </PaletteItem>
+
+                      <div className="border-t my-3"></div>
+
+                      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Participant Fields</p>
+                      {availableFields.map(field => (
+                        <PaletteItem
+                          key={field.name}
+                          type="field"
+                          fieldName={field.name}
+                          label={field.label}
+                          onAdd={handlePaletteAdd}
+                        >
+                          <Type className="h-3 w-3 mr-2 text-purple-500" />
+                          <span className="text-sm">{field.label}</span>
+                        </PaletteItem>
+                      ))}
+
+                      <div className="border-t my-3"></div>
+
+                      <PaletteItem type="customText" label="Custom Text" onAdd={handlePaletteAdd}>
+                        <Type className="h-3.5 w-3.5 mr-2 text-purple-500" />
+                        <span className="text-sm">Custom Text</span>
+                      </PaletteItem>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+
+                <AccordionItem value="background" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
+                    Background
+                  </AccordionTrigger>
+                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-slate-600">Background Color</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            type="color"
+                            value={settings.backgroundColor}
+                            onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                            className="w-12 h-9 p-1 rounded-lg border border-slate-200"
+                          />
+                          <Input
+                            type="text"
+                            value={settings.backgroundColor}
+                            onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
+                            placeholder="#ffffff"
+                            className="h-9 text-sm flex-1"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-2"></div>
+
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-slate-600">Background Image</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={isUploadingBg}
+                            className="h-9 text-xs flex-1 border-purple-200 text-purple-600 hover:bg-purple-50"
+                            onClick={() => document.getElementById('bg-file-input')?.click()}
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            {isUploadingBg ? 'Uploading…' : 'Upload Image'}
+                          </Button>
+                          <input
+                            id="bg-file-input"
+                            type="file"
+                            accept="image/png,image/jpeg,image/jpg"
+                            onChange={handleBackgroundImageUpload}
+                            className="hidden"
                           />
                         </div>
 
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => updateSettings({ backgroundImageUrl: '', backgroundImageFit: 'cover' })}
-                          className="h-7 text-xs w-full"
-                        >
-                          Remove Image
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
+                        <div className="relative text-xs text-slate-500">
+                          <div className="absolute inset-0 flex items-center">
+                            <span className="w-full border-t"></span>
+                          </div>
+                          <div className="relative flex justify-center">
+                            <span className="bg-white px-2">or use URL</span>
+                          </div>
+                        </div>
+
+                        <Input
+                          type="url"
+                          value={settings.backgroundImageUrl || ''}
+                          onChange={(e) => updateSettings({ backgroundImageUrl: e.target.value })}
+                          placeholder="https://example.com/image.jpg"
+                          className="h-9 text-sm"
+                        />
+                        <p className="text-xs text-slate-500">
+                          Upload a local file or paste an image URL.
+                        </p>
+
+                        {settings.backgroundImageUrl && (
+                          <>
+                            <div className="space-y-2">
+                              <Label className="text-xs font-semibold text-slate-600">Image Fit</Label>
+                              <Select
+                                value={settings.backgroundImageFit || 'cover'}
+                                onValueChange={(value: 'cover' | 'contain') => updateSettings({ backgroundImageFit: value })}
+                              >
+                                <SelectTrigger className="h-9 text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="cover">Cover (fill badge)</SelectItem>
+                                  <SelectItem value="contain">Contain (fit within)</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
+                              <p className="text-xs font-semibold text-slate-500 mb-1">Preview</p>
+                              <img
+                                src={settings.backgroundImageUrl}
+                                alt="Background preview"
+                                className="w-full h-24 object-cover rounded-lg"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </div>
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => updateSettings({ backgroundImageUrl: '', backgroundImageFit: 'cover' })}
+                              className="h-9 text-xs w-full border-rose-200 text-rose-600 hover:bg-rose-50"
+                            >
+                              Remove Image
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
-          </div>
+          </section>
 
           {/* Center - Badge Canvas */}
-          <div className="flex flex-col bg-gradient-to-br from-gray-100 to-gray-200 overflow-auto">
-            <div className="flex-1 flex items-center justify-center p-8 min-h-0">
-              <div className="flex flex-col items-center">
+          <section className="flex min-h-0 min-w-0 flex-[0_0_55%] basis-[55%] max-w-[55%] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
+            <div className="flex items-center justify-between px-6 pt-6">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Canvas Preview</h2>
+                <p className="text-xs text-slate-500">
+                  Zoom to fine-tune positions and drag components directly on the badge.
+                </p>
+              </div>
+            <div className="flex items-center gap-2 bg-slate-100 rounded-full border border-slate-200 px-3 py-1.5 text-slate-700 shadow-sm">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => incrementZoom(-0.1)}
+                  className="h-8 w-8 p-0"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2"
+                  step="0.05"
+                  value={zoomLevel}
+                  onChange={(event) => applyZoom(parseFloat(event.target.value))}
+                  className="w-36 accent-purple-500"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => incrementZoom(0.1)}
+                  className="h-8 w-8 p-0"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <span className="text-xs font-semibold w-12 text-center">
+                  {Math.round(zoomLevel * 100)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="flex-1 flex items-center justify-center px-8 pb-10 overflow-auto">
+              <div
+                className="relative transform transition-transform duration-200 ease-out"
+                style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center' }}
+              >
                 <BadgeCanvas
                   width={canvasWidth}
                   height={canvasHeight}
@@ -564,21 +703,22 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
                   onComponentSelect={setSelectedComponentId}
                   onComponentMove={(id, x, y) => updateComponent(id, { x, y })}
                   onComponentResize={(id, width, height) => updateComponent(id, { width, height })}
-                  onComponentDrop={handleComponentDrop}
                   event={event}
                 />
-                <div className="mt-3 px-4 py-1.5 bg-white/90 backdrop-blur rounded-full shadow-sm border">
-                  <div className="text-xs font-medium text-gray-600">
-                    {width.toFixed(1)}mm × {height.toFixed(1)}mm
-                  </div>
-                </div>
               </div>
             </div>
-          </div>
+
+            <div className="px-6 pb-6">
+              <div className="inline-flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-full text-xs font-medium border border-slate-200">
+                <span>Current size:</span>
+                <span>{width.toFixed(1)}mm × {height.toFixed(1)}mm</span>
+              </div>
+            </div>
+          </section>
 
           {/* Right Sidebar - Component Styling */}
-          <div className="border-l bg-gray-50/50 overflow-y-auto">
-            <div className="p-4">
+          <section className="flex h-full min-h-0 w-[280px] flex-shrink-0 basis-[280px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-xl">
+            <div className="flex-1 overflow-y-auto p-6">
               {selectedComponent ? (
                 <ComponentStylingPanel
                   component={selectedComponent}
@@ -588,81 +728,39 @@ function BadgeDesignerContent({ eventId, isOpen, onClose }: BadgeDesignerProps) 
                   onLogoUrlChange={(url) => updateSettings({ logoUrl: url })}
                 />
               ) : (
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                  <div className="text-center text-sm text-muted-foreground">
-                    <Move className="h-8 w-8 mx-auto mb-2 opacity-50 text-purple-400" />
-                    <p className="text-xs">Select a component on the canvas to edit its properties</p>
+                <div className="h-full flex items-center justify-center text-center text-sm text-slate-500">
+                  <div>
+                    <Move className="h-10 w-10 mx-auto mb-3 text-purple-400 opacity-70" />
+                    <p>Select a component on the canvas to edit its properties.</p>
                   </div>
                 </div>
               )}
             </div>
-          </div>
+          </section>
         </div>
-
-        {/* Action Buttons */}
-        <div className="flex gap-3 justify-end px-6 py-4 border-t bg-gradient-to-r from-white to-gray-50">
-          <Button variant="outline" onClick={onClose} className="px-6">
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleSave} 
-            disabled={isSaving}
-            className="px-6 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-          >
-            {isSaving ? (
-              <>Saving...</>
-            ) : saveSuccess ? (
-              <>
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Saved!
-              </>
-            ) : (
-              <>
-                <Save className="mr-2 h-4 w-4" />
-                Save Template
-              </>
-            )}
-          </Button>
-        </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+      </main>
+    </div>
   );
 }
 
-// Draggable Component in Palette
-interface DraggableComponentProps {
+// Palette Component Button
+interface PaletteItemProps {
   type: string;
   fieldName?: string;
   label: string;
+  onAdd: (type: string, fieldName?: string, label?: string) => void;
   children: React.ReactNode;
 }
 
-function DraggableComponent({ type, fieldName, label, children }: DraggableComponentProps) {
-  const [{ isDragging }, drag, preview] = useDrag(() => ({
-    type: 'BADGE_COMPONENT',
-    item: () => {
-      console.log('Starting drag:', { type, fieldName, label });
-      return { type, fieldName, label };
-    },
-    end: (item, monitor) => {
-      const didDrop = monitor.didDrop();
-      console.log('Drag ended:', { didDrop, item });
-    },
-    collect: (monitor) => ({
-      isDragging: monitor.isDragging()
-    })
-  }), [type, fieldName, label]);
-
+function PaletteItem({ type, fieldName, label, onAdd, children }: PaletteItemProps) {
   return (
-    <div
-      ref={drag}
-      className={`flex items-center px-2.5 py-1.5 bg-white border rounded-md cursor-move hover:bg-purple-50 hover:border-purple-300 transition-all ${
-        isDragging ? 'opacity-30 scale-95' : ''
-      }`}
+    <button
+      type="button"
+      onClick={() => onAdd(type, fieldName, label)}
+      className="w-full flex items-center px-2.5 py-1.5 bg-white border rounded-md hover:bg-purple-50 hover:border-purple-300 transition-all text-left text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-1"
     >
       {children}
-    </div>
+    </button>
   );
 }
 
@@ -678,7 +776,6 @@ interface BadgeCanvasProps {
   onComponentSelect: (id: string) => void;
   onComponentMove: (id: string, x: number, y: number) => void;
   onComponentResize: (id: string, width: number, height: number) => void;
-  onComponentDrop: (type: string, fieldName?: string, label?: string) => void;
   event: Event;
 }
 
@@ -693,24 +790,9 @@ function BadgeCanvas({
   onComponentSelect,
   onComponentMove,
   onComponentResize,
-  onComponentDrop,
   event
 }: BadgeCanvasProps) {
-  const [{ isOver, canDrop }, drop] = useDrop(() => ({
-    accept: 'BADGE_COMPONENT',
-    drop: (item: any, monitor) => {
-      console.log('Drop event triggered!', item);
-      if (!monitor.didDrop()) {
-        onComponentDrop(item.type, item.fieldName, item.label);
-      }
-      return { dropped: true };
-    },
-    canDrop: () => true,
-    collect: (monitor) => ({
-      isOver: monitor.isOver(),
-      canDrop: monitor.canDrop()
-    })
-  }), [onComponentDrop]);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const backgroundStyle: React.CSSProperties = {
     width: `${width}px`,
@@ -725,18 +807,31 @@ function BadgeCanvas({
     backgroundStyle.backgroundRepeat = 'no-repeat';
   }
 
+  const gridOverlayStyle: React.CSSProperties = {
+    backgroundSize: '20px 20px',
+    backgroundImage:
+      'linear-gradient(to right, rgba(124, 58, 237, 0.15) 1px, transparent 1px), ' +
+      'linear-gradient(to bottom, rgba(124, 58, 237, 0.15) 1px, transparent 1px)',
+    opacity: 0.25
+  };
+
   return (
     <div
-      ref={drop}
-      className={`relative border-2 shadow-2xl transition-all rounded-lg overflow-hidden ${
-        isOver && canDrop ? 'border-purple-500 ring-4 ring-purple-300 scale-[1.02]' : 'border-gray-400'
-      } ${canDrop ? 'cursor-copy' : ''}`}
+      ref={canvasRef}
+      data-badge-canvas="true"
+      className="relative border-2 border-gray-400 shadow-2xl transition-all rounded-lg overflow-hidden bg-white cursor-default"
       style={backgroundStyle}
       onClick={(e) => {
         e.stopPropagation();
         onComponentSelect(null as any);
       }}
     >
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={gridOverlayStyle}
+        aria-hidden="true"
+      />
+
       {components.map(component => (
         <CanvasComponentItem
           key={component.id}
@@ -750,23 +845,13 @@ function BadgeCanvas({
           event={event}
         />
       ))}
-      
-      {/* Drop zone indicator */}
-      {isOver && canDrop && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-purple-100/50 backdrop-blur-[2px] z-10 rounded-lg">
-          <div className="text-center text-purple-700 bg-white/80 px-6 py-4 rounded-lg shadow-lg">
-            <Plus className="h-12 w-12 mx-auto mb-2 animate-bounce" />
-            <p className="font-semibold">Drop here to add component</p>
-          </div>
-        </div>
-      )}
 
-      {components.length === 0 && !isOver && (
+      {components.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400">
             <Plus className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">Drag components here</p>
-            <p className="text-xs mt-1 opacity-70">Start designing your badge</p>
+            <p className="text-sm font-medium">Click components to add them</p>
+            <p className="text-xs mt-1 opacity-70">They will appear centered on the badge</p>
           </div>
         </div>
       )}
@@ -866,10 +951,10 @@ function CanvasComponentItem({
             fontWeight: component.fontWeight,
             fontStyle: component.fontStyle,
             textAlign: component.textAlign,
-            color: component.color
+            color: ensureReadableColor(component.color)
           }}
         >
-          {event.name}
+          {(component.customText && component.customText.trim().length > 0) ? component.customText : event.name}
         </div>
       );
     }
@@ -884,7 +969,7 @@ function CanvasComponentItem({
             fontWeight: component.fontWeight,
             fontStyle: component.fontStyle,
             textAlign: component.textAlign,
-            color: component.color
+            color: ensureReadableColor(component.color)
           }}
         >
           <div className="opacity-60 text-xs">{component.label}</div>
@@ -919,7 +1004,7 @@ function CanvasComponentItem({
             fontWeight: component.fontWeight,
             fontStyle: component.fontStyle,
             textAlign: component.textAlign,
-            color: component.color
+            color: ensureReadableColor(component.color)
           }}
         >
           {component.customText || 'Custom Text'}
@@ -971,6 +1056,7 @@ function CanvasComponentItem({
     >
       <div 
         ref={componentRef}
+        data-component-id={component.id}
         className="w-full h-full relative"
         onMouseDown={handleMouseDown}
         onClick={(e) => {
@@ -1006,253 +1092,260 @@ function ComponentStylingPanel({
   onLogoUrlChange
 }: ComponentStylingPanelProps) {
   const isTextComponent = ['field', 'eventName', 'customText'].includes(component.type);
+  const accordionDefaults = [
+    ...(isTextComponent ? ['text'] as string[] : []),
+    'position',
+    ...(component.type === 'logo' ? ['logo'] : [])
+  ];
 
   return (
-    <div className="bg-white rounded-lg border shadow-sm">
-      <div className="px-3 py-2.5 border-b bg-gradient-to-r from-purple-50 to-blue-50 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-gray-700">Component Settings</h3>
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b bg-gradient-to-r from-purple-50 to-blue-50 px-4 py-3">
+        <h3 className="text-sm font-semibold text-slate-700">Component Settings</h3>
         <Button
           variant="ghost"
           size="sm"
           onClick={onDelete}
-          className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+          className="h-7 w-7 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
-      <div className="p-3 space-y-3">
-        <div>
-          <Label className="text-xs text-muted-foreground">Component Type</Label>
-          <p className="text-sm font-medium text-purple-700">{component.label || component.type}</p>
+      <div className="px-4 py-4 space-y-4">
+        <div className="space-y-1">
+          <Label className="text-xs text-slate-500 uppercase tracking-wide">Component Type</Label>
+          <p className="text-sm font-semibold text-purple-700">{component.label || component.type}</p>
         </div>
 
-        <div className="border-t"></div>
+        <Accordion type="multiple" defaultValue={accordionDefaults} className="flex flex-col gap-3">
+          {isTextComponent && (
+            <AccordionItem value="text" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
+              <AccordionTrigger className="px-3 text-sm font-semibold text-slate-700">
+                Text & Formatting
+              </AccordionTrigger>
+              <AccordionContent className="px-3 max-h-\[calc(100vh-360px)\] overflow-y-auto space-y-4">
+                {(component.type === 'customText' || component.type === 'eventName') && (
+                  <div className="space-y-1">
+                    <Label className="text-xs font-semibold text-slate-600">
+                      {component.type === 'eventName' ? 'Display Text Override' : 'Text Content'}
+                    </Label>
+                    <Input
+                      value={component.customText || ''}
+                      onChange={(e) => onUpdate({ customText: e.target.value })}
+                      placeholder={component.type === 'eventName' ? 'Leave blank to use event name' : 'Enter custom text'}
+                      className="h-9 text-sm"
+                    />
+                    {component.type === 'eventName' && (
+                      <p className="text-[11px] text-slate-500">
+                        Leaving this empty will display the event name automatically.
+                      </p>
+                    )}
+                  </div>
+                )}
 
-        {component.type === 'customText' && (
-          <div className="space-y-1">
-            <Label className="text-xs font-medium">Text Content</Label>
-            <Input
-              value={component.customText || ''}
-              onChange={(e) => onUpdate({ customText: e.target.value })}
-              placeholder="Enter custom text"
-              className="h-8 text-xs"
-            />
-          </div>
-        )}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Font Size</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      value={component.fontSize || 16}
+                      onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
+                      min={8}
+                      max={72}
+                      className="h-9 text-sm"
+                    />
+                    <span className="text-xs text-slate-500 font-medium">px</span>
+                  </div>
+                </div>
 
-        {isTextComponent && (
-          <>
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Font Size</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  value={component.fontSize || 16}
-                  onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
-                  min={8}
-                  max={72}
-                  className="h-8 text-xs"
-                />
-                <span className="text-xs text-muted-foreground font-medium">px</span>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Font Family</Label>
-              <Select
-                value={component.fontFamily || 'sans-serif'}
-                onValueChange={(value) => onUpdate({ fontFamily: value })}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="sans-serif">Sans Serif</SelectItem>
-                  <SelectItem value="serif">Serif</SelectItem>
-                  <SelectItem value="monospace">Monospace</SelectItem>
-                  <SelectItem value="Arial">Arial</SelectItem>
-                  <SelectItem value="Times New Roman">Times New Roman</SelectItem>
-                  <SelectItem value="Courier New">Courier New</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <Label className="text-xs font-medium">Style</Label>
-                <div className="flex gap-1">
-                  <Button
-                    variant={component.fontWeight === 'bold' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() =>
-                      onUpdate({
-                        fontWeight: component.fontWeight === 'bold' ? 'normal' : 'bold'
-                      })
-                    }
-                    className={`h-8 flex-1 ${component.fontWeight === 'bold' ? 'bg-gradient-to-r from-purple-600 to-blue-600' : ''}`}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Font Family</Label>
+                  <Select
+                    value={component.fontFamily || 'sans-serif'}
+                    onValueChange={(value) => onUpdate({ fontFamily: value })}
                   >
-                    <Bold className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant={component.fontStyle === 'italic' ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() =>
-                      onUpdate({
-                        fontStyle: component.fontStyle === 'italic' ? 'normal' : 'italic'
-                      })
-                    }
-                    className={`h-8 flex-1 ${component.fontStyle === 'italic' ? 'bg-gradient-to-r from-purple-600 to-blue-600' : ''}`}
-                  >
-                    <Italic className="h-3.5 w-3.5" />
-                  </Button>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sans-serif">Sans Serif</SelectItem>
+                      <SelectItem value="serif">Serif</SelectItem>
+                      <SelectItem value="monospace">Monospace</SelectItem>
+                      <SelectItem value="Arial">Arial</SelectItem>
+                      <SelectItem value="Times New Roman">Times New Roman</SelectItem>
+                      <SelectItem value="Courier New">Courier New</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Style</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={component.fontWeight === 'bold' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() =>
+                        onUpdate({
+                          fontWeight: component.fontWeight === 'bold' ? 'normal' : 'bold'
+                        })
+                      }
+                      className={`h-9 flex-1 ${component.fontWeight === 'bold' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                    >
+                      <Bold className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant={component.fontStyle === 'italic' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() =>
+                        onUpdate({
+                          fontStyle: component.fontStyle === 'italic' ? 'normal' : 'italic'
+                        })
+                      }
+                      className={`h-9 flex-1 ${component.fontStyle === 'italic' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                    >
+                      <Italic className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Alignment</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={component.textAlign === 'left' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => onUpdate({ textAlign: 'left' })}
+                      className={`h-9 flex-1 ${component.textAlign === 'left' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                    >
+                      <AlignLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant={component.textAlign === 'center' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => onUpdate({ textAlign: 'center' })}
+                      className={`h-9 flex-1 ${component.textAlign === 'center' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                    >
+                      <AlignCenter className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant={component.textAlign === 'right' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => onUpdate({ textAlign: 'right' })}
+                      className={`h-9 flex-1 ${component.textAlign === 'right' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                    >
+                      <AlignRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Text Color</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="color"
+                      value={component.color || '#1f2937'}
+                      onChange={(e) => onUpdate({ color: e.target.value })}
+                      className="w-12 h-9 p-1 rounded-lg border border-slate-200"
+                    />
+                    <Input
+                      type="text"
+                      value={component.color || '#1f2937'}
+                      onChange={(e) => onUpdate({ color: e.target.value })}
+                      placeholder="#1f2937"
+                      className="h-9 text-sm flex-1"
+                    />
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+
+          <AccordionItem value="position" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
+            <AccordionTrigger className="px-3 text-sm font-semibold text-slate-700">
+              Position & Size
+            </AccordionTrigger>
+            <AccordionContent className="px-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Position X (%)</Label>
+                  <Input
+                    type="number"
+                    value={component.x.toFixed(1)}
+                    onChange={(e) => onUpdate({ x: parseFloat(e.target.value) })}
+                    min={0}
+                    max={100}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Position Y (%)</Label>
+                  <Input
+                    type="number"
+                    value={component.y.toFixed(1)}
+                    onChange={(e) => onUpdate({ y: parseFloat(e.target.value) })}
+                    min={0}
+                    max={100}
+                    className="h-9 text-sm"
+                  />
                 </div>
               </div>
-            </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Alignment</Label>
-              <div className="flex gap-1">
-                <Button
-                  variant={component.textAlign === 'left' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => onUpdate({ textAlign: 'left' })}
-                  className={`h-8 flex-1 ${component.textAlign === 'left' ? 'bg-gradient-to-r from-purple-600 to-blue-600' : ''}`}
-                >
-                  <AlignLeft className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant={component.textAlign === 'center' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => onUpdate({ textAlign: 'center' })}
-                  className={`h-8 flex-1 ${component.textAlign === 'center' ? 'bg-gradient-to-r from-purple-600 to-blue-600' : ''}`}
-                >
-                  <AlignCenter className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant={component.textAlign === 'right' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => onUpdate({ textAlign: 'right' })}
-                  className={`h-8 flex-1 ${component.textAlign === 'right' ? 'bg-gradient-to-r from-purple-600 to-blue-600' : ''}`}
-                >
-                  <AlignRight className="h-3.5 w-3.5" />
-                </Button>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Width (%)</Label>
+                  <Input
+                    type="number"
+                    value={component.width.toFixed(1)}
+                    onChange={(e) => onUpdate({ width: parseFloat(e.target.value) })}
+                    min={5}
+                    max={100}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-600">Height (%)</Label>
+                  <Input
+                    type="number"
+                    value={component.height.toFixed(1)}
+                    onChange={(e) => onUpdate({ height: parseFloat(e.target.value) })}
+                    min={3}
+                    max={100}
+                    className="h-9 text-sm"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium">Text Color</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="color"
-                  value={component.color || '#000000'}
-                  onChange={(e) => onUpdate({ color: e.target.value })}
-                  className="w-10 h-7 p-1"
+              <div className="flex items-center gap-3 border-t pt-3">
+                <Switch
+                  checked={component.enabled}
+                  onCheckedChange={(checked) => onUpdate({ enabled: checked })}
                 />
-                <Input
-                  type="text"
-                  value={component.color || '#000000'}
-                  onChange={(e) => onUpdate({ color: e.target.value })}
-                  placeholder="#000000"
-                  className="h-7 text-xs flex-1"
-                />
+                <Label className="text-xs font-semibold text-slate-600">Show on badge</Label>
               </div>
-            </div>
-          </>
-        )}
+            </AccordionContent>
+          </AccordionItem>
 
-        {component.type === 'logo' && (
-          <div className="space-y-1">
-            <Label className="text-xs font-medium">Logo URL</Label>
-            <Input
-              type="url"
-              value={logoUrl || ''}
-              onChange={(e) => onLogoUrlChange(e.target.value)}
-              placeholder="https://example.com/logo.png"
-              className="h-7 text-xs"
-            />
-            <p className="text-xs text-muted-foreground">
-              Or set in Event Branding settings
-            </p>
-          </div>
-        )}
-
-        <div className="border-t"></div>
-
-        <div className="bg-purple-50/50 rounded-md p-2.5 space-y-2">
-          <p className="text-xs font-medium text-purple-700 mb-1.5">Position & Size</p>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">X</Label>
-              <div className="flex items-center gap-1">
+          {component.type === 'logo' && (
+            <AccordionItem value="logo" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
+              <AccordionTrigger className="px-3 text-sm font-semibold text-slate-700">
+                Logo Options
+              </AccordionTrigger>
+              <AccordionContent className="px-3 space-y-2">
+                <Label className="text-xs font-semibold text-slate-600">Logo URL</Label>
                 <Input
-                  type="number"
-                  value={component.x.toFixed(1)}
-                  onChange={(e) => onUpdate({ x: parseFloat(e.target.value) })}
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  className="h-7 text-xs"
+                  type="url"
+                  value={logoUrl || ''}
+                  onChange={(e) => onLogoUrlChange(e.target.value)}
+                  placeholder="https://example.com/logo.png"
+                  className="h-9 text-sm"
                 />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Y</Label>
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  value={component.y.toFixed(1)}
-                  onChange={(e) => onUpdate({ y: parseFloat(e.target.value) })}
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  className="h-7 text-xs"
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Width</Label>
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  value={component.width.toFixed(1)}
-                  onChange={(e) => onUpdate({ width: parseFloat(e.target.value) })}
-                  min={5}
-                  max={100}
-                  step={0.5}
-                  className="h-7 text-xs"
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Height</Label>
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  value={component.height.toFixed(1)}
-                  onChange={(e) => onUpdate({ height: parseFloat(e.target.value) })}
-                  min={3}
-                  max={100}
-                  step={0.5}
-                  className="h-7 text-xs"
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="pt-1">
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={component.enabled}
-              onCheckedChange={(checked) => onUpdate({ enabled: checked })}
-            />
-            <Label className="text-xs font-medium">Show on badge</Label>
-          </div>
-        </div>
+                <p className="text-xs text-slate-500">
+                  Or set in Event Branding settings.
+                </p>
+              </AccordionContent>
+            </AccordionItem>
+          )}
+        </Accordion>
       </div>
     </div>
   );

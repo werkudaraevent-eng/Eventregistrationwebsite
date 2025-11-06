@@ -4,6 +4,7 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { EventSelection } from './components/EventSelection';
 import { StandaloneCheckInPage } from './components/StandaloneCheckInPage';
 import { PublicRegistrationForm } from './components/PublicRegistrationForm';
+import { BadgeDesigner } from './components/BadgeDesigner';
 import { supabase } from './utils/supabase/client';
 import * as localDB from './utils/localStorage';
 
@@ -13,13 +14,34 @@ export default function App() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [checkInAgendaId, setCheckInAgendaId] = useState<string | null>(null);
   const [registrationEventId, setRegistrationEventId] = useState<string | null>(null);
+  const [designerEventId, setDesignerEventId] = useState<string | null>(null);
 
   useEffect(() => {
     // Run data migration on app load
     localDB.migrateToMultiEventStructure();
     
-    // Check URL for check-in page route (query param)
     const urlParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+
+    // Designer route via query
+    const designerParam = urlParams.get('designer');
+    if (designerParam) {
+      setDesignerEventId(designerParam);
+      setIsCheckingSession(false);
+      return;
+    }
+
+    // Designer route via hash (#/designer/eventId)
+    const designerHashMatch = hash.match(/^#\/designer\/(.+)$/);
+    if (designerHashMatch && designerHashMatch[1]) {
+      setDesignerEventId(designerHashMatch[1]);
+      setIsCheckingSession(false);
+      return;
+    } else if (!designerParam) {
+      setDesignerEventId(null);
+    }
+    
+    // Check URL for check-in page route (query param)
     const agendaId = urlParams.get('checkin');
     if (agendaId) {
       setCheckInAgendaId(agendaId);
@@ -36,7 +58,6 @@ export default function App() {
     }
     
     // Check hash-based routing for registration (#/register/eventId)
-    const hash = window.location.hash;
     const registerMatch = hash.match(/^#\/register\/(.+)$/);
     if (registerMatch && registerMatch[1]) {
       setRegistrationEventId(registerMatch[1]);
@@ -73,8 +94,17 @@ export default function App() {
     const handleHashChange = () => {
       const hash = window.location.hash;
       const registerMatch = hash.match(/^#\/register\/(.+)$/);
+      const designerMatch = hash.match(/^#\/designer\/(.+)$/);
       if (registerMatch && registerMatch[1]) {
         setRegistrationEventId(registerMatch[1]);
+        setDesignerEventId(null);
+      } else if (designerMatch && designerMatch[1]) {
+        setDesignerEventId(designerMatch[1]);
+        setRegistrationEventId(null);
+        setCheckInAgendaId(null);
+      } else if (!hash || hash === '#/' || hash === '#') {
+        setRegistrationEventId(null);
+        setDesignerEventId(null);
       } else if (!hash || hash === '#/' || hash === '#') {
         setRegistrationEventId(null);
       }
@@ -121,6 +151,20 @@ export default function App() {
   // If this is a public registration page route, show public registration form
   if (registrationEventId) {
     return <PublicRegistrationForm eventId={registrationEventId} />;
+  }
+
+  // Dedicated badge designer route
+  if (designerEventId) {
+    return (
+      <BadgeDesigner
+        eventId={designerEventId}
+        onClose={() => {
+          const url = new URL(window.location.href);
+          url.searchParams.delete('designer');
+          window.location.replace(url.origin + url.pathname);
+        }}
+      />
+    );
   }
 
   // If admin is authenticated, show appropriate dashboard

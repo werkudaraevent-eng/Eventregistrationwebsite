@@ -30,7 +30,6 @@ import { Search, QrCode, BarChart3, Loader2, CheckCircle2, X, Camera, Clock, Ale
 import { Html5Qrcode } from 'html5-qrcode';
 import QRCodeLib from 'qrcode';
 import * as localDB from '../utils/localStorage';
-import { BadgeDesigner } from './BadgeDesigner';
 
 type AgendaItem = localDB.AgendaItem;
 type Participant = localDB.Participant;
@@ -60,7 +59,6 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
   const [successMessage, setSuccessMessage] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [autoPrintBadge, setAutoPrintBadge] = useState(false);
-  const [showBadgeDesigner, setShowBadgeDesigner] = useState(false);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
@@ -459,6 +457,13 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
     }
   };
 
+  const openBadgeDesigner = () => {
+    if (!event) return;
+    const designerUrl = new URL(window.location.origin + window.location.pathname);
+    designerUrl.searchParams.set('designer', event.id);
+    window.open(designerUrl.toString(), '_blank', 'noopener');
+  };
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     if (!query.trim()) {
@@ -766,7 +771,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setShowBadgeDesigner(true)}
+            onClick={openBadgeDesigner}
             className="w-full bg-white/10 hover:bg-white/20 text-white border-white/30"
           >
             <Settings className="mr-2 h-4 w-4" />
@@ -1097,15 +1102,6 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Badge Designer */}
-      {event && (
-        <BadgeDesigner
-          eventId={event.id}
-          isOpen={showBadgeDesigner}
-          onClose={() => setShowBadgeDesigner(false)}
-        />
-      )}
 
       <style>{`
       #qr-reader-standalone video, 

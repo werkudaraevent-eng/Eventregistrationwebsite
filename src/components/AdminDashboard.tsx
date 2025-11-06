@@ -3,9 +3,8 @@ import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ParticipantManagement } from './ParticipantManagement';
 import { AgendaManagement } from './AgendaManagement';
-import { AttendanceScanner } from './AttendanceScanner';
 import { BrandingSettings } from './BrandingSettings';
-import { LogOut, Users, Calendar, ScanLine, ArrowLeft, Palette } from 'lucide-react';
+import { LogOut, Users, Calendar, ArrowLeft, Palette } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 import * as localDB from '../utils/localStorage';
 
@@ -61,12 +60,8 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <Tabs defaultValue="scanner" className="space-y-8">
-          <TabsList className="grid w-full max-w-3xl mx-auto grid-cols-4 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 h-14">
-            <TabsTrigger value="scanner" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <ScanLine className="h-4 w-4" />
-              <span className="hidden sm:inline">Scanner</span>
-            </TabsTrigger>
+        <Tabs defaultValue="participants" className="space-y-8">
+          <TabsList className="flex w-full max-w-3xl mx-auto gap-2 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 h-14">
             <TabsTrigger value="participants" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">Participants</span>
@@ -80,10 +75,6 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
               <span className="hidden sm:inline">Branding</span>
             </TabsTrigger>
           </TabsList>
-
-          <TabsContent value="scanner">
-            <AttendanceScanner eventId={eventId} />
-          </TabsContent>
 
           <TabsContent value="participants">
             <ParticipantManagement eventId={eventId} accessToken={accessToken} />
