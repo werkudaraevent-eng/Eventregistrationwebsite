@@ -16,10 +16,11 @@ import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
-import { Trash2, Plus, Settings2 } from 'lucide-react';
+import { Trash2, Plus, Settings2, Loader2, AlertCircle, Edit } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import localDB from '../utils/localDBStub';
-import type { CustomField, ColumnVisibility } from '../utils/localDBStub';
+import { Alert, AlertDescription } from './ui/alert';
+import * as supabaseDB from '../utils/supabaseDataLayer';
+import type { CustomField, ColumnVisibility } from '../utils/supabaseDataLayer';
 
 interface ColumnManagementProps {
   eventId: string;
@@ -36,6 +37,9 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
     attendance: true,
     registered: true
   });
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<CustomField | null>(null);
   const [newField, setNewField] = useState({
     name: '',
     label: '',
@@ -49,47 +53,65 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
     loadColumnVisibility();
   }, [eventId]);
 
-  const loadCustomFields = () => {
-    const event = localDB.getEventById(eventId);
-    if (event?.customFields) {
-      setCustomFields([...event.customFields].sort((a, b) => a.order - b.order));
-    } else {
-      setCustomFields([]);
+  const loadCustomFields = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const fields = await supabaseDB.getCustomFields(eventId);
+      setCustomFields(fields);
+    } catch (err) {
+      console.error('Error loading custom fields:', err);
+      setError('Failed to load custom fields');
+    } finally {
+      setIsLoading(false);
     }
   };
   
-  const loadColumnVisibility = () => {
-    const visibility = localDB.getColumnVisibility(eventId);
-    setColumnVisibility(visibility);
+  const loadColumnVisibility = async () => {
+    try {
+      // Get branding/event settings from Supabase
+      const event = await supabaseDB.getEventById(eventId);
+      if (event?.columnVisibility) {
+        setColumnVisibility(event.columnVisibility);
+      }
+    } catch (err) {
+      console.error('Error loading column visibility:', err);
+    }
   };
   
-  const handleColumnVisibilityChange = (column: keyof ColumnVisibility, visible: boolean) => {
-    const updated = { ...columnVisibility, [column]: visible };
-    setColumnVisibility(updated);
-    localDB.updateColumnVisibility(eventId, { [column]: visible });
-    onFieldsUpdated();
+  const handleColumnVisibilityChange = async (column: keyof ColumnVisibility, visible: boolean) => {
+    try {
+      const updated = { ...columnVisibility, [column]: visible };
+      setColumnVisibility(updated);
+      await supabaseDB.updateEvent(eventId, { columnVisibility: updated });
+      onFieldsUpdated();
+    } catch (err) {
+      console.error('Error updating column visibility:', err);
+      setError('Failed to update column visibility');
+    }
   };
 
-  const handleAddField = () => {
+  const handleAddField = async () => {
     if (!newField.name.trim() || !newField.label.trim()) {
-      alert('Please enter both field name and label');
+      setError('Please enter both field name and label');
       return;
     }
 
     try {
-      const fieldData: CustomField = {
-        id: localDB.generateCustomFieldId(),
+      setIsLoading(true);
+      setError(null);
+      
+      const fieldData: Omit<CustomField, 'id' | 'order'> = {
         name: newField.name.toLowerCase().replace(/\s+/g, '_'),
         label: newField.label,
         type: newField.type,
         required: newField.required,
-        order: customFields.length,
         options: newField.type === 'select' && newField.options
           ? newField.options.split(',').map(o => o.trim()).filter(Boolean)
           : undefined
       };
 
-      localDB.addCustomField(eventId, fieldData);
+      await supabaseDB.addCustomField(eventId, fieldData);
       
       // Reset form
       setNewField({
@@ -100,47 +122,121 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
         options: ''
       });
       
-      loadCustomFields();
+      await loadCustomFields();
       onFieldsUpdated();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error adding field:', err);
-      alert('Failed to add field');
+      setError(err.message || 'Failed to add field');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleDeleteField = (fieldId: string) => {
+  const handleDeleteField = async (fieldId: string) => {
     if (!confirm('Are you sure you want to delete this field? All data in this field will be lost.')) {
       return;
     }
 
     try {
-      localDB.deleteCustomField(eventId, fieldId);
-      loadCustomFields();
+      setIsLoading(true);
+      setError(null);
+      await supabaseDB.deleteCustomField(eventId, fieldId);
+      await loadCustomFields();
       onFieldsUpdated();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error deleting field:', err);
-      alert('Failed to delete field');
+      setError(err.message || 'Failed to delete field');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleReorder = (fieldId: string, direction: 'up' | 'down') => {
+  const handleEditField = (field: CustomField) => {
+    setEditingField(field);
+    setNewField({
+      name: field.name,
+      label: field.label,
+      type: field.type,
+      required: field.required,
+      options: field.options ? field.options.join(', ') : ''
+    });
+  };
+
+  const handleUpdateField = async () => {
+    if (!editingField || !newField.label.trim()) {
+      setError('Please enter field label');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const fieldData: Partial<CustomField> = {
+        label: newField.label,
+        type: newField.type,
+        required: newField.required,
+        options: newField.type === 'select' && newField.options
+          ? newField.options.split(',').map(o => o.trim()).filter(Boolean)
+          : undefined
+      };
+
+      await supabaseDB.updateCustomField(eventId, editingField.id, fieldData);
+      
+      // Reset form and editing state
+      setEditingField(null);
+      setNewField({
+        name: '',
+        label: '',
+        type: 'text',
+        required: false,
+        options: ''
+      });
+      
+      await loadCustomFields();
+      onFieldsUpdated();
+    } catch (err: any) {
+      console.error('Error updating field:', err);
+      setError(err.message || 'Failed to update field');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingField(null);
+    setNewField({
+      name: '',
+      label: '',
+      type: 'text',
+      required: false,
+      options: ''
+    });
+  };
+
+  const handleReorder = async (fieldId: string, direction: 'up' | 'down') => {
     const currentIndex = customFields.findIndex(f => f.id === fieldId);
     if (currentIndex === -1) return;
 
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (newIndex < 0 || newIndex >= customFields.length) return;
 
-    const reordered = [...customFields];
-    const [removed] = reordered.splice(currentIndex, 1);
-    reordered.splice(newIndex, 0, removed);
-
     try {
-      localDB.reorderCustomFields(eventId, reordered.map(f => f.id));
-      loadCustomFields();
+      setIsLoading(true);
+      setError(null);
+      
+      const reordered = [...customFields];
+      const [removed] = reordered.splice(currentIndex, 1);
+      reordered.splice(newIndex, 0, removed);
+
+      await supabaseDB.reorderCustomFields(eventId, reordered.map(f => f.id));
+      await loadCustomFields();
       onFieldsUpdated();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error reordering fields:', err);
-      alert('Failed to reorder fields');
+      setError(err.message || 'Failed to reorder fields');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -171,6 +267,13 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
           <DialogHeader>
             <DialogTitle>Manage Participant Columns</DialogTitle>
           </DialogHeader>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
           <div className="flex-1 overflow-y-auto space-y-6">
             {/* System Fields */}
@@ -294,14 +397,26 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                             )}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDeleteField(field.id)}
-                              className="h-8 w-8 p-0 text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEditField(field)}
+                                className="h-8 w-8 p-0 text-blue-600"
+                                title="Edit field"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteField(field.id)}
+                                className="h-8 w-8 p-0 text-destructive"
+                                title="Delete field"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -311,9 +426,19 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
               )}
             </div>
 
-            {/* Add New Field Form */}
+            {/* Add/Edit Field Form */}
             <div className="border rounded-lg p-4 bg-muted/50">
-              <h3 className="text-sm font-semibold mb-4">Add New Custom Field</h3>
+              <h3 className="text-sm font-semibold mb-4">
+                {editingField ? 'Edit Custom Field' : 'Add New Custom Field'}
+              </h3>
+              
+              {editingField && (
+                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                  <p className="text-sm text-blue-800">
+                    Editing field: <span className="font-semibold">{editingField.label}</span>
+                  </p>
+                </div>
+              )}
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -336,9 +461,10 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                     placeholder="e.g., dietary_preferences"
                     value={newField.name}
                     onChange={(e) => setNewField({ ...newField, name: e.target.value })}
+                    disabled={!!editingField}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Internal identifier (lowercase, no spaces)
+                    {editingField ? 'Cannot be changed' : 'Internal identifier (lowercase, no spaces)'}
                   </p>
                 </div>
 
@@ -356,6 +482,7 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                       <SelectItem value="email">Email</SelectItem>
                       <SelectItem value="tel">Phone</SelectItem>
                       <SelectItem value="number">Number</SelectItem>
+                      <SelectItem value="date">Date</SelectItem>
                       <SelectItem value="textarea">Long Text</SelectItem>
                       <SelectItem value="select">Dropdown</SelectItem>
                     </SelectContent>
@@ -388,14 +515,56 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                 </div>
               </div>
 
-              <Button
-                onClick={handleAddField}
-                className="mt-4"
-                size="sm"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Field
-              </Button>
+              <div className="flex gap-2 mt-4">
+                {editingField ? (
+                  <>
+                    <Button
+                      onClick={handleUpdateField}
+                      size="sm"
+                      disabled={isLoading}
+                      className="gradient-primary"
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Updating...
+                        </>
+                      ) : (
+                        <>
+                          <Edit className="mr-2 h-4 w-4" />
+                          Update Field
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      onClick={handleCancelEdit}
+                      size="sm"
+                      variant="outline"
+                      disabled={isLoading}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    onClick={handleAddField}
+                    size="sm"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Field
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         </DialogContent>

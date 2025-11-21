@@ -22,7 +22,7 @@ export interface CustomField {
   id: string;
   name: string;
   label: string;
-  type: 'text' | 'email' | 'tel' | 'number' | 'textarea' | 'select';
+  type: 'text' | 'email' | 'tel' | 'number' | 'date' | 'textarea' | 'select';
   required: boolean;
   options?: string[];
   order: number;
@@ -85,16 +85,78 @@ export interface AgendaItem {
 
 // ===== HELPER FUNCTIONS =====
 
+/**
+ * ID Generation System
+ * 
+ * Format: [PREFIX]-[TIMESTAMP]-[RANDOM]
+ * Examples:
+ * - Event: evt-1730900000-abc123d4
+ * - Participant: prt-1730900000-xyz789w2
+ * - Agenda: agd-1730900000-efg456h8
+ */
+
+// Generate random alphanumeric string
+function generateRandomSuffix(length: number = 8): string {
+  const chars = '0123456789abcdefghijklmnopqrstuvwxyz';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Get timestamp in seconds (shorter than milliseconds)
+function getTimestamp(): string {
+  return Math.floor(Date.now() / 1000).toString();
+}
+
 export function generateEventId(): string {
-  return 'E' + Date.now() + Math.random().toString(36).substring(2, 6).toUpperCase();
+  // Format: evt-[10-digit-timestamp]-[8-char-random]
+  // Example: evt-1730900000-abc123d4
+  return `evt-${getTimestamp()}-${generateRandomSuffix(8)}`;
 }
 
 export function generateParticipantId(): string {
-  return 'P' + Date.now() + Math.random().toString(36).substring(2, 9).toUpperCase();
+  // Format: prt-[10-digit-timestamp]-[8-char-random]
+  // Example: prt-1730900000-xyz789w2
+  return `prt-${getTimestamp()}-${generateRandomSuffix(8)}`;
 }
 
 export function generateAgendaId(): string {
-  return 'A' + Date.now();
+  // Format: agd-[10-digit-timestamp]-[8-char-random]
+  // Example: agd-1730900000-efg456h8
+  return `agd-${getTimestamp()}-${generateRandomSuffix(8)}`;
+}
+
+export function generateCustomFieldId(): string {
+  // Format: fld-[10-digit-timestamp]-[8-char-random]
+  // Example: fld-1730900000-qwe123r5
+  return `fld-${getTimestamp()}-${generateRandomSuffix(8)}`;
+}
+
+/**
+ * Parse ID to extract information
+ * Returns: { prefix, timestamp, random }
+ */
+export function parseId(id: string): { prefix: string; timestamp: string; random: string } | null {
+  const match = id.match(/^([a-z]{3})-(\d{10})-([a-z0-9]{8})$/);
+  if (!match) return null;
+  
+  return {
+    prefix: match[1],
+    timestamp: match[2],
+    random: match[3]
+  };
+}
+
+/**
+ * Get readable date from ID
+ */
+export function getIdDate(id: string): Date | null {
+  const parsed = parseId(id);
+  if (!parsed) return null;
+  
+  return new Date(parseInt(parsed.timestamp) * 1000);
 }
 
 // ===== EVENT MANAGEMENT =====
@@ -208,7 +270,7 @@ export async function getParticipantById(id: string, eventId: string): Promise<P
   }
 }
 
-export async function createParticipant(participant: Omit<Participant, 'id' | 'registeredAt'>): Promise<Participant> {
+export async function createParticipant(participant: Omit<Participant, 'id' | 'registeredAt' | 'attendance'>): Promise<Participant> {
   const newParticipant: Participant = {
     id: generateParticipantId(),
     registeredAt: new Date().toISOString(),
@@ -319,6 +381,93 @@ export async function deleteAgendaItem(id: string, eventId: string): Promise<voi
     .eq('eventId', eventId);
   
   if (error) throw error;
+}
+
+// ===== CUSTOM FIELDS MANAGEMENT =====
+
+export async function getCustomFields(eventId: string): Promise<CustomField[]> {
+  try {
+    const event = await getEventById(eventId);
+    if (!event?.customFields) return [];
+    
+    // Sort by order
+    return [...event.customFields].sort((a, b) => a.order - b.order);
+  } catch (error) {
+    console.error('Error fetching custom fields:', error);
+    return [];
+  }
+}
+
+export async function addCustomField(eventId: string, field: Omit<CustomField, 'id' | 'order'>): Promise<CustomField> {
+  try {
+    const event = await getEventById(eventId);
+    if (!event) throw new Error('Event not found');
+    
+    const customFields = event.customFields || [];
+    const newField: CustomField = {
+      ...field,
+      id: generateCustomFieldId(),
+      order: customFields.length,
+    };
+    
+    const updatedFields = [...customFields, newField];
+    await updateEvent(eventId, { customFields: updatedFields });
+    
+    return newField;
+  } catch (error) {
+    console.error('Error adding custom field:', error);
+    throw error;
+  }
+}
+
+export async function deleteCustomField(eventId: string, fieldId: string): Promise<void> {
+  try {
+    const event = await getEventById(eventId);
+    if (!event) throw new Error('Event not found');
+    
+    const customFields = (event.customFields || []).filter(f => f.id !== fieldId);
+    await updateEvent(eventId, { customFields });
+  } catch (error) {
+    console.error('Error deleting custom field:', error);
+    throw error;
+  }
+}
+
+export async function updateCustomField(eventId: string, fieldId: string, updates: Partial<CustomField>): Promise<void> {
+  try {
+    const event = await getEventById(eventId);
+    if (!event) throw new Error('Event not found');
+    
+    const customFields = (event.customFields || []).map(f => 
+      f.id === fieldId ? { ...f, ...updates } : f
+    );
+    
+    await updateEvent(eventId, { customFields });
+  } catch (error) {
+    console.error('Error updating custom field:', error);
+    throw error;
+  }
+}
+
+export async function reorderCustomFields(eventId: string, fieldIds: string[]): Promise<void> {
+  try {
+    const event = await getEventById(eventId);
+    if (!event) throw new Error('Event not found');
+    
+    const fieldsMap = new Map(
+      (event.customFields || []).map(f => [f.id, f])
+    );
+    
+    const reorderedFields = fieldIds
+      .map(id => fieldsMap.get(id)!)
+      .filter(Boolean)
+      .map((f, index) => ({ ...f, order: index }));
+    
+    await updateEvent(eventId, { customFields: reorderedFields });
+  } catch (error) {
+    console.error('Error reordering custom fields:', error);
+    throw error;
+  }
 }
 
 // ===== BRANDING MANAGEMENT =====

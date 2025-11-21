@@ -15,7 +15,7 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Palette, Upload, Eye, Save, X } from 'lucide-react';
+import { Palette, Upload, Eye, Save, X, Wand2 } from 'lucide-react';
 import localDB from '../utils/localDBStub';
 import type { BrandingSettings as BrandingSettingsType } from '../utils/localDBStub';
 
@@ -111,6 +111,20 @@ export function BrandingSettings({ eventId, onUpdated }: BrandingSettingsProps) 
               </CardDescription>
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Open badge designer with referrer to admin dashboard
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('designer', eventId);
+                  url.searchParams.set('from', `admin=event`);
+                  window.location.href = url.toString();
+                }}
+              >
+                <Wand2 className="mr-2 h-4 w-4" />
+                Design Badge
+              </Button>
               <Button
                 variant="outline"
                 size="sm"

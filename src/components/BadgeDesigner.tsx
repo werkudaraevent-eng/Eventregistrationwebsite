@@ -25,6 +25,7 @@ import {
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
 import QRCodeLib from 'qrcode';
 import localDB from '../utils/localDBStub';
+import { supabase } from '../utils/supabase/client';
 import type { BadgeSettings, Event } from '../utils/localDBStub';
 
 interface BadgeDesignerProps {
@@ -157,25 +158,79 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     }
   };
 
-  const loadEvent = () => {
-    const eventData = localDB.getEventById(eventId);
-    setEvent(eventData);
-    
-    if (eventData) {
-      const standardFields = [
-        { name: 'name', label: 'Name' },
-        { name: 'email', label: 'Email' },
-        { name: 'phone', label: 'Phone' },
-        { name: 'company', label: 'Company' },
-        { name: 'position', label: 'Position' }
-      ];
-      
-      const customFields = (eventData.customFields || []).map(cf => ({
-        name: cf.name,
-        label: cf.label
-      }));
-      
-      setAvailableFields([...standardFields, ...customFields]);
+  const loadEvent = async () => {
+    try {
+      // Handle both old format (E...) and new format (evt-...)
+      let query = supabase
+        .from('events')
+        .select('*')
+        .eq('id', eventId);
+
+      const { data, error } = await query.single();
+
+      if (error) {
+        // If event not found, try searching in other fields as fallback
+        console.warn('Event not found by ID, searching by legacy ID...');
+        
+        // For now, just log the error
+        console.error('Error loading event:', error);
+        return;
+      }
+
+      if (data) {
+        // Convert database format to component format
+        const eventData: Event = {
+          id: data.id,
+          name: data.name,
+          description: data.description,
+          startDate: data.start_date,
+          endDate: data.end_date,
+          location: data.location,
+          customFields: data.custom_fields || [],
+          branding: data.branding || {}
+        };
+        
+        setEvent(eventData);
+        
+        const standardFields = [
+          { name: 'name', label: 'Name' },
+          { name: 'email', label: 'Email' },
+          { name: 'phone', label: 'Phone' },
+          { name: 'company', label: 'Company' },
+          { name: 'position', label: 'Position' }
+        ];
+        
+        const customFields = (data.custom_fields || []).map((cf: any) => ({
+          name: cf.id,
+          label: cf.label
+        }));
+        
+        setAvailableFields([...standardFields, ...customFields]);
+
+        // Load badge template if exists
+        if (data.badge_template) {
+          const template = data.badge_template;
+          setSettings({
+            size: template.size || 'CR80',
+            customWidth: template.customWidth || 100,
+            customHeight: template.customHeight || 150,
+            backgroundColor: template.backgroundColor || '#f3f4f6',
+            backgroundImageUrl: template.backgroundImageUrl || '',
+            backgroundImageFit: (template.backgroundImageFit || 'cover') as any,
+            logoUrl: template.logoUrl || '',
+            showQR: true,
+            showAttendance: false,
+            textColor: '#000000',
+            accentColor: '#000000',
+            components: []
+          } as any);
+          if (template.components) {
+            setCanvasComponents(template.components.map((c: any) => normalizeComponent(c)));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading event from Supabase:', error);
     }
   };
 
@@ -184,24 +239,31 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     
     setIsSaving(true);
     try {
-      // Convert canvas components back to basic components for storage
-      const basicComponents = canvasComponents.map(c => ({
-        id: c.id,
-        type: c.type,
-        fieldName: c.fieldName,
-        label: c.label,
-        enabled: c.enabled,
-        order: c.order
-      }));
-      
-      const updatedSettings = {
-        ...settings,
-        components: basicComponents as any
+      // Store canvas layout in Supabase badge_template field
+      const badgeTemplate = {
+        size: settings.size || 'CR80',
+        customWidth: settings.customWidth,
+        customHeight: settings.customHeight,
+        backgroundColor: settings.backgroundColor,
+        backgroundImageUrl: settings.backgroundImageUrl,
+        backgroundImageFit: settings.backgroundImageFit,
+        logoUrl: settings.logoUrl,
+        components: canvasComponents
       };
       
-      localDB.updateBadgeSettings(eventId, updatedSettings);
+      // Update event record in Supabase with badge template
+      const { error } = await supabase
+        .from('events')
+        .update({
+          badge_template: badgeTemplate
+        })
+        .eq('id', eventId);
       
-      // Also save canvas layout separately
+      if (error) {
+        throw new Error(`Failed to save badge template: ${error.message}`);
+      }
+
+      // Also save canvas layout to localStorage as backup
       localStorage.setItem(`badge_canvas_${eventId}`, JSON.stringify(canvasComponents));
       
       setSaveSuccess(true);
@@ -211,7 +273,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       }, 1500);
     } catch (error) {
       console.error('Error saving badge settings:', error);
-      alert('Failed to save badge settings');
+      alert('Failed to save badge settings: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setIsSaving(false);
     }
@@ -337,7 +399,14 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   };
 
   if (!settings || !event) {
-    return null;
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600 font-medium">Loading Badge Designer...</p>
+        </div>
+      </div>
+    );
   }
 
   const selectedSize = BADGE_SIZES[settings.size || 'CR80'];
@@ -349,61 +418,62 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const selectedComponent = canvasComponents.find(c => c.id === selectedComponentId);
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white overflow-hidden">
-      <header className="flex-shrink-0 px-10 py-6 border-b border-white/15 bg-white/10 backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-3">
-              <Type className="h-6 w-6 text-purple-300" />
-              Badge Designer – {event.name}
-            </h1>
-            <p className="text-sm text-white/70 mt-1">
-              Click palette items to add them to the badge and customize their appearance in real time.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              onClick={handleClose}
-              className="h-10 px-5 border-white/40 text-white bg-white/10 hover:bg-white/20 hover:text-white"
-            >
-              Exit Designer
+    <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
+      <header className="flex-shrink-0 px-8 py-5 bg-gradient-to-r from-white to-purple-50 border-b border-purple-200 flex items-center justify-between shadow-sm">
+        <div>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-purple-800 bg-clip-text text-transparent">
+            Badge Designer
+          </h1>
+          <p className="text-sm text-gray-600 mt-1">{event.name}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={handleClose}
+            variant="outline"
+            className="px-6 h-10 border-gray-300 text-gray-700 hover:bg-gray-100"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving}
+            className="px-8 h-10 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white border-none font-semibold shadow-lg hover:shadow-xl transition-all"
+          >
+            {isSaving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                Saving…
+              </>
+            ) : saveSuccess ? (
+              <>
+                <CheckCircle2 className="mr-2 h-5 w-5" />
+                Saved!
+              </>
+            ) : (
+              <>
+                <Save className="mr-2 h-5 w-5" />
+                Save Template
+              </>
+            )}
             </Button>
-            <Button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="h-10 px-6 bg-gradient-to-r from-purple-500 via-fuchsia-500 to-indigo-500 hover:from-purple-500/90 hover:to-indigo-500/90 text-white border-none"
-            >
-              {isSaving ? (
-                <>Saving…</>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Saved!
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Template
-                </>
-              )}
-            </Button>
-          </div>
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 px-10 py-8 overflow-hidden">
-        <div className="mx-auto flex h-full min-h-0 max-w-[1600px] gap-6">
-          {/* Left Sidebar - Component Palette */}
-          <section className="flex h-full min-h-0 w-[280px] flex-shrink-0 basis-[280px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-xl">
-            <div className="flex h-full flex-col gap-4 p-4">
-              <Accordion type="multiple" defaultValue={['size', 'palette']} className="flex flex-col gap-4">
-                <AccordionItem value="size" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
+      <main className="flex-1 min-h-0 px-6 py-6 overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
+        <div className="mx-auto flex h-full min-h-0 gap-4">
+          {/* Left Sidebar - CONTROLS */}
+          <section className="w-64 flex-shrink-0 flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-md hover:shadow-lg transition-shadow">
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border-b border-purple-200">
+              <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wider">⚙️ Controls</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <Accordion type="multiple" defaultValue={['size', 'palette']} className="w-full">
+                <AccordionItem value="size" className="border border-purple-100 rounded-lg hover:border-purple-300 transition-colors">
+                  <AccordionTrigger className="px-3 py-2 text-sm font-semibold text-purple-900 hover:bg-purple-50">
                     Badge Size
                   </AccordionTrigger>
-                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
-                    <div className="space-y-3">
+                  <AccordionContent className="px-3 pt-2 pb-3">
+                    <div className="space-y-2">
                       <RadioGroup
                         value={settings.size}
                         onValueChange={(value: string) => updateSettings({ size: value as any })}
@@ -413,7 +483,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                           <label
                             key={key}
                             htmlFor={`size-${key}`}
-                            className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:border-purple-400 hover:bg-purple-50/50 transition-colors cursor-pointer"
+                            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-purple-50 cursor-pointer"
                           >
                             <RadioGroupItem value={key} id={`size-${key}`} />
                             <span>{label}</span>
@@ -422,63 +492,59 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                       </RadioGroup>
 
                       {settings.size === 'custom' && (
-                        <div className="grid grid-cols-2 gap-3 pt-2">
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-600">Width (mm)</Label>
+                        <div className="grid grid-cols-2 gap-2 pt-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs font-medium text-gray-600">Width (mm)</Label>
                             <Input
                               type="number"
                               value={settings.customWidth || 100}
                               onChange={(e) => updateSettings({ customWidth: parseInt(e.target.value) })}
-                              className="h-9 text-sm"
+                              className="h-8 text-xs"
                             />
                           </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-600">Height (mm)</Label>
+                          <div className="space-y-1">
+                            <Label className="text-xs font-medium text-gray-600">Height (mm)</Label>
                             <Input
                               type="number"
                               value={settings.customHeight || 150}
                               onChange={(e) => updateSettings({ customHeight: parseInt(e.target.value) })}
-                              className="h-9 text-sm"
+                              className="h-8 text-xs"
                             />
                           </div>
                         </div>
                       )}
 
-                      <div className="text-xs font-semibold text-purple-600 bg-purple-50 rounded-lg px-3 py-2">
-                        Preview size: {width.toFixed(1)}mm × {height.toFixed(1)}mm
+                      <div className="text-xs text-purple-700 bg-purple-50 rounded px-2 py-1.5 font-medium">
+                        {width.toFixed(1)}mm × {height.toFixed(1)}mm
                       </div>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="palette" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
-                    Component Palette
+                <AccordionItem value="palette" className="border border-purple-100 rounded-lg mt-2 hover:border-purple-300 transition-colors">
+                  <AccordionTrigger className="px-3 py-2 text-sm font-semibold text-purple-900 hover:bg-purple-50">
+                    📦 Component Palette
                   </AccordionTrigger>
-                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
+                  <AccordionContent className="px-3 pt-2 pb-3">
                     <div className="space-y-2">
-                      <p className="text-xs text-slate-500">
-                        Click a component to drop it onto the badge canvas.
-                      </p>
-
                       <PaletteItem type="eventName" label="Event Name" onAdd={handlePaletteAdd}>
-                        <Type className="h-3.5 w-3.5 mr-2 text-purple-500" />
-                        <span className="text-sm">Event Name</span>
+                        <Type className="h-4 w-4 mr-2 text-purple-600" />
+                        <span className="text-sm font-medium">Event Name</span>
                       </PaletteItem>
 
                       <PaletteItem type="qrcode" label="QR Code" onAdd={handlePaletteAdd}>
-                        <QrCode className="h-3.5 w-3.5 mr-2 text-purple-500" />
-                        <span className="text-sm">QR Code</span>
+                        <QrCode className="h-4 w-4 mr-2 text-purple-600" />
+                        <span className="text-sm font-medium">QR Code</span>
                       </PaletteItem>
 
                       <PaletteItem type="logo" label="Event Logo" onAdd={handlePaletteAdd}>
-                        <ImageIcon className="h-3.5 w-3.5 mr-2 text-purple-500" />
-                        <span className="text-sm">Event Logo</span>
+                        <ImageIcon className="h-4 w-4 mr-2 text-purple-600" />
+                        <span className="text-sm font-medium">Event Logo</span>
                       </PaletteItem>
 
-                      <div className="border-t my-3"></div>
+                      <div className="border-t border-purple-100 my-2"></div>
 
-                      <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Participant Fields</p>
+                      <div className="text-xs font-bold text-purple-700 uppercase tracking-wider my-2">👥 Participant Fields</div>
                       {availableFields.map(field => (
                         <PaletteItem
                           key={field.name}
@@ -487,131 +553,79 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                           label={field.label}
                           onAdd={handlePaletteAdd}
                         >
-                          <Type className="h-3 w-3 mr-2 text-purple-500" />
-                          <span className="text-sm">{field.label}</span>
+                          <Type className="h-4 w-4 mr-2 text-purple-600" />
+                          <span className="text-sm font-medium">{field.label}</span>
                         </PaletteItem>
                       ))}
 
-                      <div className="border-t my-3"></div>
+                      <div className="border-t border-purple-100 my-2"></div>
 
                       <PaletteItem type="customText" label="Custom Text" onAdd={handlePaletteAdd}>
-                        <Type className="h-3.5 w-3.5 mr-2 text-purple-500" />
-                        <span className="text-sm">Custom Text</span>
+                        <Type className="h-4 w-4 mr-2 text-purple-600" />
+                        <span className="text-sm font-medium">Custom Text</span>
                       </PaletteItem>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="background" className="border border-slate-200 border-b-0 rounded-2xl bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 text-sm font-semibold text-slate-700">
-                    Background
+                <AccordionItem value="background" className="border border-purple-100 rounded-lg mt-2 hover:border-purple-300 transition-colors">
+                  <AccordionTrigger className="px-3 py-2 text-sm font-semibold text-purple-900 hover:bg-purple-50">
+                    🖼️ Background
                   </AccordionTrigger>
-                  <AccordionContent className="px-4 max-h-[calc(100vh-320px)] overflow-y-auto">
-                    <div className="space-y-3">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-slate-600">Background Color</Label>
+                  <AccordionContent className="px-3 pt-2 pb-3">
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs font-bold text-purple-700">Color</Label>
                         <div className="flex gap-2">
                           <Input
                             type="color"
                             value={settings.backgroundColor}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                            className="w-12 h-9 p-1 rounded-lg border border-slate-200"
+                            className="w-10 h-8 p-1 rounded border-2 border-purple-300"
                           />
                           <Input
                             type="text"
                             value={settings.backgroundColor}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
                             placeholder="#ffffff"
-                            className="h-9 text-sm flex-1"
+                            className="h-8 text-xs flex-1 border-purple-200 focus:border-purple-500"
                           />
                         </div>
                       </div>
 
-                      <div className="border-t pt-2"></div>
+                      <div className="border-t border-purple-100 pt-2"></div>
 
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-slate-600">Background Image</Label>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={isUploadingBg}
-                            className="h-9 text-xs flex-1 border-purple-200 text-purple-600 hover:bg-purple-50"
-                            onClick={() => document.getElementById('bg-file-input')?.click()}
-                          >
-                            <Upload className="h-4 w-4 mr-2" />
-                            {isUploadingBg ? 'Uploading…' : 'Upload Image'}
-                          </Button>
-                          <input
-                            id="bg-file-input"
-                            type="file"
-                            accept="image/png,image/jpeg,image/jpg"
-                            onChange={handleBackgroundImageUpload}
-                            className="hidden"
-                          />
-                        </div>
-
-                        <div className="relative text-xs text-slate-500">
-                          <div className="absolute inset-0 flex items-center">
-                            <span className="w-full border-t"></span>
-                          </div>
-                          <div className="relative flex justify-center">
-                            <span className="bg-white px-2">or use URL</span>
-                          </div>
-                        </div>
-
-                        <Input
-                          type="url"
-                          value={settings.backgroundImageUrl || ''}
-                          onChange={(e) => updateSettings({ backgroundImageUrl: e.target.value })}
-                          placeholder="https://example.com/image.jpg"
-                          className="h-9 text-sm"
+                      <div className="space-y-1">
+                        <Label className="text-xs font-bold text-purple-700">Image</Label>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isUploadingBg}
+                          className="h-8 text-xs w-full border-purple-300 text-purple-700 hover:bg-purple-50"
+                          onClick={() => document.getElementById('bg-file-input')?.click()}
+                        >
+                          <Upload className="h-3 w-3 mr-1" />
+                          {isUploadingBg ? 'Uploading…' : 'Upload'}
+                        </Button>
+                        <input
+                          id="bg-file-input"
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg"
+                          onChange={handleBackgroundImageUpload}
+                          className="hidden"
                         />
-                        <p className="text-xs text-slate-500">
-                          Upload a local file or paste an image URL.
-                        </p>
-
-                        {settings.backgroundImageUrl && (
-                          <>
-                            <div className="space-y-2">
-                              <Label className="text-xs font-semibold text-slate-600">Image Fit</Label>
-                              <Select
-                                value={settings.backgroundImageFit || 'cover'}
-                                onValueChange={(value: 'cover' | 'contain') => updateSettings({ backgroundImageFit: value })}
-                              >
-                                <SelectTrigger className="h-9 text-sm">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="cover">Cover (fill badge)</SelectItem>
-                                  <SelectItem value="contain">Contain (fit within)</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-
-                            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-2">
-                              <p className="text-xs font-semibold text-slate-500 mb-1">Preview</p>
-                              <img
-                                src={settings.backgroundImageUrl}
-                                alt="Background preview"
-                                className="w-full h-24 object-cover rounded-lg"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                }}
-                              />
-                            </div>
-
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => updateSettings({ backgroundImageUrl: '', backgroundImageFit: 'cover' })}
-                              className="h-9 text-xs w-full border-rose-200 text-rose-600 hover:bg-rose-50"
-                            >
-                              Remove Image
-                            </Button>
-                          </>
-                        )}
                       </div>
+
+                      {settings.backgroundImageUrl && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => updateSettings({ backgroundImageUrl: '', backgroundImageFit: 'cover' })}
+                          className="h-8 text-xs w-full text-red-600 border-red-200 hover:bg-red-50"
+                        >
+                          Remove Image
+                        </Button>
+                      )}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
@@ -619,24 +633,19 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
             </div>
           </section>
 
-          {/* Center - Badge Canvas */}
-          <section className="flex min-h-0 min-w-0 flex-[0_0_55%] basis-[55%] max-w-[55%] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-2xl">
-            <div className="flex items-center justify-between px-6 pt-6">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">Canvas Preview</h2>
-                <p className="text-xs text-slate-500">
-                  Zoom to fine-tune positions and drag components directly on the badge.
-                </p>
-              </div>
-            <div className="flex items-center gap-2 bg-slate-100 rounded-full border border-slate-200 px-3 py-1.5 text-slate-700 shadow-sm">
+          {/* Center - Canvas Preview */}
+          <section className="flex-1 min-h-0 flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-lg hover:shadow-xl transition-shadow">
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border-b border-purple-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-purple-900 uppercase tracking-wider">🎨 Canvas Preview</h2>
+              <div className="flex items-center gap-2 bg-purple-100 rounded-full px-2 py-1 border border-purple-200">
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onClick={() => incrementZoom(-0.1)}
-                  className="h-8 w-8 p-0"
+                  className="h-6 w-6 p-0 text-purple-700 hover:bg-purple-200"
                 >
-                  <Minus className="h-4 w-4" />
+                  <Minus className="h-3 w-3" />
                 </Button>
                 <input
                   type="range"
@@ -645,27 +654,27 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                   step="0.05"
                   value={zoomLevel}
                   onChange={(event) => applyZoom(parseFloat(event.target.value))}
-                  className="w-36 accent-purple-500"
+                  className="w-24 accent-purple-600 h-2 rounded-full"
                 />
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onClick={() => incrementZoom(0.1)}
-                  className="h-8 w-8 p-0"
+                  className="h-6 w-6 p-0 text-purple-700 hover:bg-purple-200"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3 w-3" />
                 </Button>
-                <span className="text-xs font-semibold w-12 text-center">
+                <span className="text-xs font-bold w-10 text-center text-purple-900">
                   {Math.round(zoomLevel * 100)}%
                 </span>
               </div>
             </div>
 
-            <div className="flex-1 flex items-center justify-center px-8 pb-10 overflow-auto">
+            <div className="flex-1 flex items-center justify-center overflow-auto bg-gradient-to-b from-purple-50 to-purple-100 p-6">
               <div
-                className="relative transform transition-transform duration-200 ease-out"
-                style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center' }}
+                className="relative transform transition-transform duration-200 ease-out shadow-2xl rounded-lg"
+                style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
               >
                 <BadgeCanvas
                   width={canvasWidth}
@@ -683,17 +692,19 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
               </div>
             </div>
 
-            <div className="px-6 pb-6">
-              <div className="inline-flex items-center gap-2 bg-slate-100 text-slate-600 px-4 py-2 rounded-full text-xs font-medium border border-slate-200">
-                <span>Current size:</span>
-                <span>{width.toFixed(1)}mm × {height.toFixed(1)}mm</span>
-              </div>
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border-t border-purple-200">
+              <span className="text-xs text-purple-900 font-bold">
+                Size: {width.toFixed(1)}mm × {height.toFixed(1)}mm
+              </span>
             </div>
           </section>
 
-          {/* Right Sidebar - Component Styling */}
-          <section className="flex h-full min-h-0 w-[280px] flex-shrink-0 basis-[280px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-slate-900 shadow-xl">
-            <div className="flex-1 overflow-y-auto p-6">
+          {/* Right Sidebar - COMPONENT SETTINGS */}
+          <section className="w-64 flex-shrink-0 flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-lg hover:shadow-xl transition-shadow">
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-purple-100 border-b border-purple-200">
+              <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wider">⚡ Component Settings</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
               {selectedComponent ? (
                 <ComponentStylingPanel
                   component={selectedComponent}
@@ -703,10 +714,10 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                   onLogoUrlChange={(url) => updateSettings({ logoUrl: url })}
                 />
               ) : (
-                <div className="h-full flex items-center justify-center text-center text-sm text-slate-500">
+                <div className="h-full flex items-center justify-center text-center">
                   <div>
-                    <Move className="h-10 w-10 mx-auto mb-3 text-purple-400 opacity-70" />
-                    <p>Select a component on the canvas to edit its properties.</p>
+                    <Move className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+                    <p className="text-xs text-gray-500">Select a component on canvas to edit</p>
                   </div>
                 </div>
               )}
@@ -732,7 +743,7 @@ function PaletteItem({ type, fieldName, label, onAdd, children }: PaletteItemPro
     <button
       type="button"
       onClick={() => onAdd(type, fieldName, label)}
-      className="w-full flex items-center px-2.5 py-1.5 bg-white border rounded-md hover:bg-purple-50 hover:border-purple-300 transition-all text-left text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-1"
+      className="w-full flex items-center px-3 py-2 bg-gradient-to-r from-purple-50 to-transparent border border-purple-200 rounded-lg hover:from-purple-100 hover:to-purple-50 hover:border-purple-400 hover:shadow-sm transition-all text-left text-sm font-semibold text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1 active:scale-95"
     >
       {children}
     </button>
@@ -783,12 +794,16 @@ function BadgeCanvas({
   }
 
   const gridOverlayStyle: React.CSSProperties = {
-    backgroundSize: '20px 20px',
+    backgroundSize: '10px 10px',
     backgroundImage:
-      'linear-gradient(to right, rgba(124, 58, 237, 0.15) 1px, transparent 1px), ' +
-      'linear-gradient(to bottom, rgba(124, 58, 237, 0.15) 1px, transparent 1px)',
-    opacity: 0.25
+      'linear-gradient(to right, rgba(124, 58, 237, 0.2) 1px, transparent 1px), ' +
+      'linear-gradient(to bottom, rgba(124, 58, 237, 0.2) 1px, transparent 1px)',
+    opacity: 0.5
   };
+
+  // Center guidelines
+  const centerX = width / 2;
+  const centerY = height / 2;
 
   return (
     <div
@@ -804,6 +819,34 @@ function BadgeCanvas({
       <div
         className="absolute inset-0 pointer-events-none"
         style={gridOverlayStyle}
+        aria-hidden="true"
+      />
+
+      {/* Center horizontal line */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          left: 0,
+          top: `${(centerY / height) * 100}%`,
+          width: '100%',
+          height: '1px',
+          backgroundColor: 'rgba(200, 100, 255, 0.3)',
+          borderTop: '1px dashed rgba(124, 58, 237, 0.4)'
+        }}
+        aria-hidden="true"
+      />
+
+      {/* Center vertical line */}
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          left: `${(centerX / width) * 100}%`,
+          top: 0,
+          width: '1px',
+          height: '100%',
+          backgroundColor: 'rgba(200, 100, 255, 0.3)',
+          borderLeft: '1px dashed rgba(124, 58, 237, 0.4)'
+        }}
         aria-hidden="true"
       />
 

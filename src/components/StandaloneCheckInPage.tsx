@@ -283,10 +283,10 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
     if (!event || !agenda) return;
     
     try {
-      // @ts-ignore - Badge settings from stub (placeholder for badge designer integration)
-      const badgeSettings: any = { 
-        width: 210, 
-        height: 148,
+      // Try to load badge template from Supabase (new system)
+      let canvasLayout: any = null;
+      let badgeSettings: any = {
+        size: 'CR80',
         customWidth: 100,
         customHeight: 150,
         backgroundColor: '#ffffff',
@@ -294,10 +294,25 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         backgroundImageFit: 'cover',
         logoUrl: undefined
       };
-      
-      // Try to load canvas layout
-      const canvasLayoutStr = localStorage.getItem(`badge_canvas_${event.id}`);
-      const canvasLayout = canvasLayoutStr ? JSON.parse(canvasLayoutStr) : null;
+
+      // Check if event has badge_template in Supabase
+      if ((event as any).badge_template) {
+        const template = (event as any).badge_template;
+        badgeSettings = {
+          size: template.size || 'CR80',
+          customWidth: template.customWidth,
+          customHeight: template.customHeight,
+          backgroundColor: template.backgroundColor || '#ffffff',
+          backgroundImageUrl: template.backgroundImageUrl,
+          backgroundImageFit: template.backgroundImageFit || 'cover',
+          logoUrl: template.logoUrl
+        };
+        canvasLayout = template.components;
+      } else {
+        // Fallback to localStorage
+        const canvasLayoutStr = localStorage.getItem(`badge_canvas_${event.id}`);
+        canvasLayout = canvasLayoutStr ? JSON.parse(canvasLayoutStr) : null;
+      }
       
       // Generate QR code for participant
       const qrCodeUrl = await QRCodeLib.toDataURL(participant.id, {
@@ -522,6 +537,8 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
     if (!event) return;
     const designerUrl = new URL(window.location.origin + window.location.pathname);
     designerUrl.searchParams.set('designer', event.id);
+    // Add referrer so we can go back to check-in page after save
+    designerUrl.searchParams.set('from', `checkin=${agendaId}`);
     window.open(designerUrl.toString(), '_blank', 'noopener');
   };
 

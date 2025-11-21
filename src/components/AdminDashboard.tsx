@@ -4,7 +4,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ParticipantManagement } from './ParticipantManagement';
 import { AgendaManagement } from './AgendaManagement';
 import { BrandingSettings } from './BrandingSettings';
-import { LogOut, Users, Calendar, ArrowLeft, Palette } from 'lucide-react';
+import { EmailTemplates } from './EmailTemplates';
+import BlastCampaigns from './BlastCampaigns';
+import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 
 interface AdminDashboardProps {
@@ -26,6 +28,16 @@ interface Event {
 
 export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents }: AdminDashboardProps) {
   const [event, setEvent] = useState<Event | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('participants');
+
+  // Read tab from URL query parameter on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam && ['participants', 'agenda', 'branding', 'emails', 'blast'].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+  }, []);
 
   useEffect(() => {
     const loadEvent = async () => {
@@ -50,6 +62,14 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
       loadEvent();
     }
   }, [eventId]);
+
+  const handleTabChange = (tabValue: string) => {
+    setActiveTab(tabValue);
+    // Save tab to URL
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', tabValue);
+    window.history.pushState({}, '', url);
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -86,8 +106,8 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <Tabs defaultValue="participants" className="space-y-8">
-          <TabsList className="flex w-full max-w-3xl mx-auto gap-2 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 h-14">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-8">
+          <TabsList className="flex w-full max-w-5xl mx-auto gap-2 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 h-14">
             <TabsTrigger value="participants" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">Participants</span>
@@ -99,6 +119,14 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
             <TabsTrigger value="branding" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
               <Palette className="h-4 w-4" />
               <span className="hidden sm:inline">Branding</span>
+            </TabsTrigger>
+            <TabsTrigger value="emails" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
+              <Mail className="h-4 w-4" />
+              <span className="hidden sm:inline">Templates</span>
+            </TabsTrigger>
+            <TabsTrigger value="blast" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
+              <Send className="h-4 w-4" />
+              <span className="hidden sm:inline">Blast</span>
             </TabsTrigger>
           </TabsList>
 
@@ -112,6 +140,14 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
           <TabsContent value="branding">
             <BrandingSettings eventId={eventId} />
+          </TabsContent>
+
+          <TabsContent value="emails">
+            <EmailTemplates eventId={eventId} />
+          </TabsContent>
+
+          <TabsContent value="blast">
+            <BlastCampaigns eventId={eventId} />
           </TabsContent>
         </Tabs>
       </main>

@@ -1,5 +1,5 @@
 {
-      "name": "Event Registration Website",
+      "name": "event-registration-website",
       "version": "0.1.0",
       "private": true,
       "dependencies": {
@@ -60,10 +60,14 @@
             "@types/react": "^19.2.2",
             "@types/react-dom": "^19.2.2",
             "@vitejs/plugin-react-swc": "^3.10.2",
-            "vite": "6.3.5"
+            "supabase": "^2.54.11",
+            "vite": "^6.4.1"
       },
       "scripts": {
             "dev": "vite",
-            "build": "vite build"
+            "build": "vite build",
+            "db:push": "supabase db push",
+            "db:pull": "supabase db pull",
+            "db:status": "supabase migration list"
       }
 }

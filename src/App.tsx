@@ -5,6 +5,7 @@ import { EventSelection } from './components/EventSelection';
 import { StandaloneCheckInPage } from './components/StandaloneCheckInPage';
 import { PublicRegistrationForm } from './components/PublicRegistrationForm';
 import { BadgeDesigner } from './components/BadgeDesigner';
+import { Toaster } from './components/ui/sonner';
 import { supabase } from './utils/supabase/client';
 
 export default function App() {
@@ -61,6 +62,12 @@ export default function App() {
       return;
     }
 
+    // Check URL for selected event (admin dashboard)
+    const selectedEventParam = urlParams.get('event');
+    if (selectedEventParam) {
+      setSelectedEventId(selectedEventParam);
+    }
+
     // Check for existing session
     const checkSession = async () => {
       try {
@@ -108,14 +115,26 @@ export default function App() {
   const handleLogout = () => {
     setAccessToken(null);
     setSelectedEventId(null);
+    // Remove event ID from URL on logout
+    const url = new URL(window.location.href);
+    url.searchParams.delete('event');
+    window.history.pushState({}, '', url);
   };
 
   const handleEventSelected = (eventId: string) => {
     setSelectedEventId(eventId);
+    // Add event ID to URL so it persists on refresh
+    const url = new URL(window.location.href);
+    url.searchParams.set('event', eventId);
+    window.history.pushState({}, '', url);
   };
 
   const handleBackToEvents = () => {
     setSelectedEventId(null);
+    // Remove event ID from URL
+    const url = new URL(window.location.href);
+    url.searchParams.delete('event');
+    window.history.pushState({}, '', url);
   };
 
   if (isCheckingSession) {
@@ -146,8 +165,28 @@ export default function App() {
         eventId={designerEventId}
         onClose={() => {
           const url = new URL(window.location.href);
-          url.searchParams.delete('designer');
-          window.location.replace(url.origin + url.pathname);
+          const referrer = url.searchParams.get('from');
+          
+          // If came from check-in page, go back to check-in
+          if (referrer && referrer.startsWith('checkin=')) {
+            const agendaId = referrer.replace('checkin=', '');
+            const redirectUrl = new URL(window.location.origin + window.location.pathname);
+            redirectUrl.searchParams.set('checkin', agendaId);
+            window.location.replace(redirectUrl.toString());
+          } 
+          // If came from admin, go back to admin with event parameter
+          else if (referrer && referrer.startsWith('admin=')) {
+            const redirectUrl = new URL(window.location.origin + window.location.pathname);
+            redirectUrl.searchParams.set('event', designerEventId);
+            redirectUrl.searchParams.set('tab', 'branding');
+            window.location.replace(redirectUrl.toString());
+          }
+          // Otherwise go to home
+          else {
+            url.searchParams.delete('designer');
+            url.searchParams.delete('from');
+            window.location.replace(url.origin + url.pathname);
+          }
         }}
       />
     );
@@ -179,8 +218,11 @@ export default function App() {
   // Default landing page: Show Admin Login
   // Public registration is ONLY accessible via specific event URLs (#/register/[eventId])
   return (
-    <DedicatedAdminLogin 
-      onAuthenticated={handleAuthenticated}
-    />
+    <>
+      <DedicatedAdminLogin 
+        onAuthenticated={handleAuthenticated}
+      />
+      <Toaster position="top-right" richColors />
+    </>
   );
 }
