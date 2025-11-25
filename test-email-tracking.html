@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Tracking Test</title>
+</head>
+<body>
+    <h1>Email Tracking Pixel Test</h1>
+    
+    <p>Klik tombol di bawah untuk test tracking pixel:</p>
+    
+    <button onclick="testTracking()">Test Tracking Pixel</button>
+    
+    <div id="result" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;"></div>
+
+    <h2>Manual Test:</h2>
+    <p>Copy salah satu Email ID dari Email History table, lalu paste di bawah:</p>
+    <input type="text" id="emailId" placeholder="Email ID (e.g., EM1732456789ABCD)" style="width: 300px; padding: 5px;">
+    <input type="text" id="participantId" placeholder="Participant ID (e.g., prt-123...)" style="width: 300px; padding: 5px; margin-left: 10px;">
+    <button onclick="testWithId()">Test dengan ID ini</button>
+
+    <div id="pixelContainer"></div>
+
+    <script>
+        const SUPABASE_URL = 'https://xtrognfmzyzqhsfvtgne.supabase.co';
+
+        function testTracking() {
+            const emailId = 'TEST123';
+            const participantId = 'TEST456';
+            
+            const result = document.getElementById('result');
+            result.innerHTML = `<p>Testing tracking pixel...</p>
+                <p>URL: ${SUPABASE_URL}/functions/v1/track-email?id=${emailId}&pid=${participantId}</p>
+                <p>Loading pixel...</p>`;
+
+            // Create tracking pixel
+            const img = document.createElement('img');
+            img.src = `${SUPABASE_URL}/functions/v1/track-email?id=${emailId}&pid=${participantId}`;
+            img.width = 1;
+            img.height = 1;
+            img.style.display = 'none';
+            
+            img.onload = function() {
+                result.innerHTML += '<p style="color: green;">✅ Pixel loaded successfully! Check Supabase logs.</p>';
+            };
+            
+            img.onerror = function() {
+                result.innerHTML += '<p style="color: red;">❌ Failed to load pixel. Check CORS or edge function.</p>';
+            };
+
+            document.getElementById('pixelContainer').appendChild(img);
+        }
+
+        function testWithId() {
+            const emailId = document.getElementById('emailId').value;
+            const participantId = document.getElementById('participantId').value;
+            
+            if (!emailId || !participantId) {
+                alert('Please enter both Email ID and Participant ID');
+                return;
+            }
+
+            const result = document.getElementById('result');
+            result.innerHTML = `<p>Testing with real IDs...</p>
+                <p>Email ID: ${emailId}</p>
+                <p>Participant ID: ${participantId}</p>
+                <p>URL: ${SUPABASE_URL}/functions/v1/track-email?id=${emailId}&pid=${participantId}</p>
+                <p>Loading pixel...</p>`;
+
+            // Create tracking pixel
+            const img = document.createElement('img');
+            img.src = `${SUPABASE_URL}/functions/v1/track-email?id=${emailId}&pid=${participantId}`;
+            img.width = 1;
+            img.height = 1;
+            img.style.display = 'none';
+            
+            img.onload = function() {
+                result.innerHTML += '<p style="color: green;">✅ Pixel loaded successfully!</p>';
+                result.innerHTML += '<p>Now check Email History - the status should change to "Opened"</p>';
+                result.innerHTML += '<p>If status doesn\'t change, check:</p>';
+                result.innerHTML += '<ul><li>Database participant_emails table - opened_at should be updated</li>';
+                result.innerHTML += '<li>Supabase Edge Function logs for track-email</li>';
+                result.innerHTML += '<li>RLS policies on participant_emails table</li></ul>';
+            };
+            
+            img.onerror = function() {
+                result.innerHTML += '<p style="color: red;">❌ Failed to load pixel</p>';
+                result.innerHTML += '<p>Possible issues:</p>';
+                result.innerHTML += '<ul><li>Edge function not deployed</li>';
+                result.innerHTML += '<li>CORS issue</li>';
+                result.innerHTML += '<li>Invalid URL</li></ul>';
+            };
+
+            document.getElementById('pixelContainer').appendChild(img);
+        }
+
+        // Also test direct fetch
+        function testDirect() {
+            fetch(`${SUPABASE_URL}/functions/v1/track-email?id=TEST123&pid=TEST456`)
+                .then(response => {
+                    console.log('Response:', response);
+                    document.getElementById('result').innerHTML += '<p>Check browser console for response</p>';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('result').innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+                });
+        }
+    </script>
+</body>
+</html>

@@ -1,11 +1,9 @@
 /**
- * BrandingSettings - Manage Registration Form Branding
+ * BrandingSettings - Manage Registration Form & Branding
  * 
- * Allows event organizers to customize:
- * - Event logo and positioning
- * - Color scheme (primary and background)
- * - Typography
- * - Custom header text
+ * Two-tab system:
+ * 1. Form Fields - Configure registration form fields (dynamic)
+ * 2. Appearance - Customize branding (logo, colors, fonts)
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -15,11 +13,35 @@ import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Palette, Upload, Eye, Save, X, Wand2 } from 'lucide-react';
-import localDB from '../utils/localDBStub';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Switch } from './ui/switch';
+import { Badge } from './ui/badge';
+import { Palette, Upload, Eye, Save, X, Wand2, List, GripVertical, Edit2, Trash2, Plus, Settings } from 'lucide-react';
+import { supabase } from './utils/supabase/client';
 import type { BrandingSettings as BrandingSettingsType } from '../utils/localDBStub';
 
 type BrandingSettings = BrandingSettingsType;
+
+interface CustomField {
+  id: string;
+  name: string;
+  label: string;
+  type: 'text' | 'email' | 'tel' | 'number' | 'date' | 'textarea' | 'select';
+  required: boolean;
+  visible?: boolean;
+  options?: string[];
+  order: number;
+  placeholder?: string;
+}
+
+interface BuiltInField {
+  name: string;
+  label: string;
+  type: string;
+  required: boolean;
+  visible: boolean;
+  locked?: boolean;
+}
 
 interface BrandingSettingsProps {
   eventId: string;

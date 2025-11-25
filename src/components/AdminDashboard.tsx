@@ -3,10 +3,12 @@ import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ParticipantManagement } from './ParticipantManagement';
 import { AgendaManagement } from './AgendaManagement';
-import { BrandingSettings } from './BrandingSettings';
+import { BrandingSettings } from './BrandingSettingsNew';
 import { EmailTemplates } from './EmailTemplates';
 import BlastCampaigns from './BlastCampaigns';
-import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send } from 'lucide-react';
+import { EmailConfigurationV2 } from './EmailConfigurationV2';
+import { EmailHistory } from './EmailHistory';
+import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 
 interface AdminDashboardProps {
@@ -34,7 +36,7 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
-    if (tabParam && ['participants', 'agenda', 'branding', 'emails', 'blast'].includes(tabParam)) {
+    if (tabParam && ['participants', 'agenda', 'branding', 'emails', 'blast', 'email-config', 'email-history'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, []);
@@ -128,6 +130,14 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
               <Send className="h-4 w-4" />
               <span className="hidden sm:inline">Blast</span>
             </TabsTrigger>
+            <TabsTrigger value="email-config" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
+              <Settings className="h-4 w-4" />
+              <span className="hidden sm:inline">Email Settings</span>
+            </TabsTrigger>
+            <TabsTrigger value="email-history" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
+              <History className="h-4 w-4" />
+              <span className="hidden sm:inline">Email History</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="participants">
@@ -148,6 +158,14 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
           <TabsContent value="blast">
             <BlastCampaigns eventId={eventId} />
+          </TabsContent>
+
+          <TabsContent value="email-config">
+            <EmailConfigurationV2 />
+          </TabsContent>
+
+          <TabsContent value="email-history">
+            <EmailHistory eventId={eventId} />
           </TabsContent>
         </Tabs>
       </main>

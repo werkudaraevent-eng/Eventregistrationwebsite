@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Tracking Test - Quick Check</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 50px auto;
+            padding: 30px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin: 20px 0;
+        }
+        h1 {
+            color: #8b5cf6;
+            margin-bottom: 10px;
+        }
+        .step {
+            background: #f0f4ff;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 4px solid #8b5cf6;
+            border-radius: 4px;
+        }
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            display: inline-block;
+            text-decoration: none;
+            margin: 10px 5px;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        }
+        .button.secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: monospace;
+        }
+        .result {
+            background: #e8f5e9;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #4caf50;
+            display: none;
+        }
+        .result.show {
+            display: block;
+        }
+        code {
+            background: #263238;
+            color: #aed581;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .warning {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+            color: #e65100;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>📧 Email Tracking Test</h1>
+        <p style="color: #666;">Quick test untuk memastikan tracking pixel bekerja dengan benar</p>
+
+        <div class="step">
+            <strong>📋 Step 1:</strong> Ambil Email Log ID dari database atau console
+            <input type="text" id="emailLogId" placeholder="Contoh: EM1764064838804AA29" value="">
+        </div>
+
+        <div class="step">
+            <strong>👤 Step 2:</strong> Ambil Participant ID (opsional)
+            <input type="text" id="participantId" placeholder="Contoh: part_1763875473-pelt0ujj" value="">
+        </div>
+
+        <div class="step">
+            <strong>🚀 Step 3:</strong> Trigger tracking pixel
+            <br><br>
+            <button class="button" onclick="testTracking()">Test Tracking Pixel</button>
+            <a href="https://supabase.com/dashboard/project/xtrognfmzyzqhsfvtgne/functions/track-email/logs" 
+               class="button secondary" 
+               target="_blank">
+                View Edge Function Logs
+            </a>
+        </div>
+
+        <div id="result" class="result">
+            <h3>✅ Test Complete!</h3>
+            <p id="resultMessage"></p>
+        </div>
+
+        <div class="step warning">
+            <strong>⚠️ Troubleshooting:</strong><br>
+            1. Pastikan RLS policy sudah diupdate (jalankan <code>FIX_TRACKING_RLS_POLICY.sql</code>)<br>
+            2. Check Edge Function logs untuk error detail<br>
+            3. Pastikan Email Log ID valid (ada di database)<br>
+            4. Gmail mungkin block pixel - test dengan email client lain
+        </div>
+    </div>
+
+    <script>
+        async function testTracking() {
+            const emailLogId = document.getElementById('emailLogId').value.trim();
+            const participantId = document.getElementById('participantId').value.trim();
+            const resultDiv = document.getElementById('result');
+            const resultMessage = document.getElementById('resultMessage');
+
+            if (!emailLogId) {
+                alert('Email Log ID harus diisi!');
+                return;
+            }
+
+            resultDiv.classList.remove('show');
+            
+            const supabaseUrl = 'https://xtrognfmzyzqhsfvtgne.supabase.co';
+            let trackingUrl = `${supabaseUrl}/functions/v1/track-email?id=${emailLogId}`;
+            if (participantId) {
+                trackingUrl += `&pid=${participantId}`;
+            }
+
+            console.log('🔍 Testing tracking URL:', trackingUrl);
+
+            try {
+                // Load tracking pixel
+                const img = new Image();
+                img.onload = function() {
+                    console.log('✅ Tracking pixel loaded successfully');
+                    resultDiv.classList.add('show');
+                    resultMessage.innerHTML = `
+                        <strong>Tracking URL triggered:</strong><br>
+                        <code>${trackingUrl}</code><br><br>
+                        <strong>Next:</strong><br>
+                        1. Check Edge Function Logs (klik tombol View Logs)<br>
+                        2. Refresh Email History page<br>
+                        3. Status should change to "Opened"<br><br>
+                        <strong>Look for these logs:</strong><br>
+                        • [track-email] Attempting to update email log: ${emailLogId}<br>
+                        • [track-email] ✅ Email log updated successfully
+                    `;
+                };
+                
+                img.onerror = function() {
+                    console.log('⚠️ Image load error (this might be normal)');
+                    resultDiv.classList.add('show');
+                    resultMessage.innerHTML = `
+                        Image load error - but this is normal for tracking pixels.<br>
+                        <strong>Check Edge Function Logs to see actual result.</strong>
+                    `;
+                };
+                
+                img.src = trackingUrl;
+
+                // Also try fetch
+                setTimeout(async () => {
+                    try {
+                        const response = await fetch(trackingUrl);
+                        console.log('📡 Fetch response status:', response.status);
+                        if (response.ok) {
+                            console.log('✅ Edge function responded with 200 OK');
+                        }
+                    } catch (e) {
+                        console.error('❌ Fetch error:', e);
+                    }
+                }, 500);
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Auto-fill with latest email from console if available
+        window.addEventListener('load', () => {
+            console.log('💡 TIP: Buka Campaign, kirim test email, copy Email Log ID dari console ke form ini');
+            console.log('📝 Atau query database: SELECT id FROM participant_emails ORDER BY created_at DESC LIMIT 1;');
+        });
+    </script>
+</body>
+</html>

@@ -6,7 +6,7 @@ import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, RefreshCw, Download, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 
 interface AgendaItem {
@@ -52,6 +52,8 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
   const [dropdownPosition, setDropdownPosition] = useState<{ top?: number; bottom?: number; right: number }>({ right: 0 });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' } | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -71,6 +73,14 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Reset search and sort when dialog opens/closes
+  useEffect(() => {
+    if (!selectedAgendaForParticipants) {
+      setSearchTerm('');
+      setSortConfig(null);
+    }
+  }, [selectedAgendaForParticipants]);
 
   // Calculate dropdown position based on viewport
   const calculateDropdownPosition = useCallback((button: HTMLElement) => {
@@ -312,6 +322,64 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
     );
   };
 
+  const handleSort = (field: string) => {
+    setSortConfig(current => {
+      if (!current || current.field !== field) {
+        return { field, direction: 'asc' };
+      }
+      if (current.direction === 'asc') {
+        return { field, direction: 'desc' };
+      }
+      return null; // Clear sort
+    });
+  };
+
+  const getFilteredAndSortedParticipants = (agendaTitle: string) => {
+    let filtered = getParticipantsForAgenda(agendaTitle);
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(p => 
+        p.name.toLowerCase().includes(term) || 
+        (p.company || '').toLowerCase().includes(term)
+      );
+    }
+
+    // Apply sorting
+    if (sortConfig) {
+      filtered.sort((a, b) => {
+        let aValue: any;
+        let bValue: any;
+
+        if (sortConfig.field === 'checkInTime') {
+          const aAttendance = a.attendance.find(att => att.agendaItem === agendaTitle);
+          const bAttendance = b.attendance.find(att => att.agendaItem === agendaTitle);
+          aValue = aAttendance ? new Date(aAttendance.timestamp).getTime() : 0;
+          bValue = bAttendance ? new Date(bAttendance.timestamp).getTime() : 0;
+        } else {
+          aValue = (a[sortConfig.field as keyof Participant] || '').toString().toLowerCase();
+          bValue = (b[sortConfig.field as keyof Participant] || '').toString().toLowerCase();
+        }
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return filtered;
+  };
+
+  const getSortIcon = (field: string) => {
+    if (!sortConfig || sortConfig.field !== field) {
+      return <ArrowUpDown className="h-3 w-3 opacity-30" />;
+    }
+    return sortConfig.direction === 'asc' 
+      ? <ArrowUp className="h-3 w-3 text-purple-600" />
+      : <ArrowDown className="h-3 w-3 text-purple-600" />;
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -454,6 +522,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                   <TableHead>Start Time</TableHead>
                   <TableHead>End Time</TableHead>
                   <TableHead>Location</TableHead>
+                  <TableHead>Check-in Number</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -490,6 +559,15 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                         ) : (
                           <span className="text-muted-foreground">-</span>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-green-600" />
+                          <span className="text-sm font-semibold text-green-700">
+                            {getParticipantsForAgenda(item.title).length}
+                          </span>
+                          <span className="text-xs text-muted-foreground">attendees</span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex gap-1 justify-end items-center">
@@ -587,49 +665,185 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
 
         {/* Participants List Dialog */}
         <Dialog open={!!selectedAgendaForParticipants} onOpenChange={(open: boolean) => !open && setSelectedAgendaForParticipants(null)}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Participants for: {selectedAgendaForParticipants}</DialogTitle>
-              <DialogDescription>
-                {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).length} attendees
-              </DialogDescription>
+          <DialogContent className="flex flex-col p-0" style={{ width: '90vw', maxWidth: '90vw', height: '90vh', maxHeight: '90vh' }}>
+            <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-purple-50 to-blue-50 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-xl">Participants for: {selectedAgendaForParticipants}</DialogTitle>
+                  <DialogDescription className="mt-1">
+                    {selectedAgendaForParticipants && getFilteredAndSortedParticipants(selectedAgendaForParticipants).length} attendees
+                    {searchTerm && selectedAgendaForParticipants && ` (filtered from ${getParticipantsForAgenda(selectedAgendaForParticipants).length} total)`}
+                  </DialogDescription>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!selectedAgendaForParticipants) return;
+                    const participants = getFilteredAndSortedParticipants(selectedAgendaForParticipants);
+                    
+                    // Prepare CSV data
+                    const headers = ['Name', 'Email', 'Company', 'Position', 'Check-in Time'];
+                    const rows = participants.map(participant => {
+                      const attendance = participant.attendance.find(a => a.agendaItem === selectedAgendaForParticipants);
+                      return [
+                        participant.name,
+                        participant.email,
+                        participant.company || '-',
+                        participant.position || '-',
+                        attendance ? new Date(attendance.timestamp).toLocaleString() : '-'
+                      ];
+                    });
+                    
+                    // Create CSV content
+                    const csvContent = [
+                      headers.join(','),
+                      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+                    ].join('\n');
+                    
+                    // Download CSV
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', `${selectedAgendaForParticipants}_participants_${new Date().toISOString().split('T')[0]}.csv`);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 gradient-primary text-white rounded-lg hover:opacity-90 transition-opacity shadow-md shadow-purple-500/30"
+                >
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </button>
+              </div>
+              
+              {/* Search Box */}
+              <div className="mt-4 relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Search by name or company..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </DialogHeader>
-            <div className="max-h-96 overflow-y-auto">
-              {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Users className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                  <p>No participants yet for this session</p>
+            
+            <div className="flex-1 overflow-hidden relative">
+              {selectedAgendaForParticipants && getFilteredAndSortedParticipants(selectedAgendaForParticipants).length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="h-16 w-16 mx-auto mb-4 opacity-30" />
+                  {searchTerm ? (
+                    <>
+                      <p className="text-lg">No participants found matching "{searchTerm}"</p>
+                      <button
+                        onClick={() => setSearchTerm('')}
+                        className="mt-4 text-purple-600 hover:text-purple-700 underline"
+                      >
+                        Clear search
+                      </button>
+                    </>
+                  ) : (
+                    <p className="text-lg">No participants yet for this session</p>
+                  )}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Position</TableHead>
-                      <TableHead>Check-in Time</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).map((participant) => {
-                      const attendance = participant.attendance.find(a => a.agendaItem === selectedAgendaForParticipants);
-                      return (
-                        <TableRow key={participant.id}>
-                          <TableCell>{participant.name}</TableCell>
-                          <TableCell>{participant.email}</TableCell>
-                          <TableCell>{participant.company || '-'}</TableCell>
-                          <TableCell>{participant.position || '-'}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
-                            {attendance && new Date(attendance.timestamp).toLocaleTimeString()}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                <div 
+                  className="overflow-x-auto overflow-y-auto h-full"
+                  style={{ 
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: '#a855f7 #f3f4f6'
+                  }}
+                >
+                  <table className="w-full caption-bottom text-sm" style={{ minWidth: '800px' }}>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }} className="border-b">
+                      <tr className="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors">
+                        <th 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          style={{ minWidth: '180px' }}
+                          onClick={() => handleSort('name')}
+                        >
+                          <div className="flex items-center gap-2">
+                            Name
+                            {getSortIcon('name')}
+                          </div>
+                        </th>
+                        <th 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          style={{ minWidth: '220px' }}
+                          onClick={() => handleSort('email')}
+                        >
+                          <div className="flex items-center gap-2">
+                            Email
+                            {getSortIcon('email')}
+                          </div>
+                        </th>
+                        <th 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          style={{ minWidth: '180px' }}
+                          onClick={() => handleSort('company')}
+                        >
+                          <div className="flex items-center gap-2">
+                            Company
+                            {getSortIcon('company')}
+                          </div>
+                        </th>
+                        <th 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          style={{ minWidth: '150px' }}
+                          onClick={() => handleSort('position')}
+                        >
+                          <div className="flex items-center gap-2">
+                            Position
+                            {getSortIcon('position')}
+                          </div>
+                        </th>
+                        <th 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          style={{ minWidth: '180px' }}
+                          onClick={() => handleSort('checkInTime')}
+                        >
+                          <div className="flex items-center gap-2">
+                            Check-in Time
+                            {getSortIcon('checkInTime')}
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="[&_tr:last-child]:border-0">
+                      {selectedAgendaForParticipants && getFilteredAndSortedParticipants(selectedAgendaForParticipants).map((participant) => {
+                        const attendance = participant.attendance.find(a => a.agendaItem === selectedAgendaForParticipants);
+                        return (
+                          <tr key={participant.id} className="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors">
+                            <td className="h-10 px-4 align-middle font-medium" style={{ minWidth: '180px' }}>{participant.name}</td>
+                            <td className="h-10 px-4 align-middle" style={{ minWidth: '220px' }}>{participant.email}</td>
+                            <td className="h-10 px-4 align-middle" style={{ minWidth: '180px' }}>{participant.company || '-'}</td>
+                            <td className="h-10 px-4 align-middle" style={{ minWidth: '150px' }}>{participant.position || '-'}</td>
+                            <td className="h-10 px-4 align-middle text-sm text-muted-foreground" style={{ minWidth: '180px' }}>
+                              {attendance && new Date(attendance.timestamp).toLocaleString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
+            
+            {/* Scroll hint */}
+            {selectedAgendaForParticipants && getParticipantsForAgenda(selectedAgendaForParticipants).length > 5 && (
+              <div className="text-center py-2 text-xs text-gray-400 border-t bg-gray-50/50">
+                ← Scroll to see all participants →
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </CardContent>

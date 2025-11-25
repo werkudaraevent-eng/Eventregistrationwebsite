@@ -117,10 +117,10 @@ export default function EmailCenter({ eventId, eventName }: Props) {
     try {
       // Get email logs with participant info
       const { data: logs } = await supabase
-        .from('email_logs')
+        .from('participant_emails')
         .select(`
           *,
-          participants!inner(id, eventId, name, email)
+          participants!inner(id, "eventId", name, email)
         `)
         .eq('participants.eventId', eventId)
         .order('sent_at', { ascending: false })

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Email Tracking - Enhanced Debug</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            background: #f5f5f5;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        input {
+            padding: 8px;
+            width: 100%;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-left: 4px solid #4CAF50;
+        }
+        .error {
+            border-left-color: #f44336;
+            background: #ffebee;
+        }
+        code {
+            background: #263238;
+            color: #aed581;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Email Tracking Debug Tool</h1>
+    
+    <div class="info">
+        <h3>📋 Instructions:</h3>
+        <ol>
+            <li>Ambil <strong>Email ID</strong> dari Email History (contoh: EM1763985499447D991)</li>
+            <li>Ambil <strong>Participant ID</strong> dari console (contoh: part_1762929719206_eqGe8xp39)</li>
+            <li>Klik tombol "Test Tracking" di bawah</li>
+            <li>Buka <strong>Supabase Dashboard → Edge Functions → track-email → Logs</strong> untuk lihat detail error</li>
+            <li>Refresh Email History page untuk cek apakah status berubah</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 1: Direct Tracking Pixel</h2>
+        <label>Email ID:</label>
+        <input type="text" id="emailId" placeholder="EM1763985499447D991" value="EM1763985499447D991">
+        
+        <label>Participant ID:</label>
+        <input type="text" id="participantId" placeholder="part_1762929719206_eqGe8xp39" value="part_1762929719206_eqGe8xp39">
+        
+        <button onclick="testTracking()">🚀 Test Tracking</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Check Logs in Supabase</h2>
+        <p>Setelah test, buka link ini untuk lihat logs:</p>
+        <a href="https://supabase.com/dashboard/project/xtrognfmzyzqhsfvtgne/functions/track-email/logs" target="_blank">
+            📊 View Edge Function Logs
+        </a>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Verify RLS Policies</h2>
+        <p>Pastikan RLS policy sudah dijalankan. Buka Supabase SQL Editor dan run:</p>
+        <pre><code>SELECT policyname, roles, cmd
+FROM pg_policies
+WHERE tablename = 'participant_emails';</code></pre>
+        <p>Harus ada policy untuk <code>service_role</code> dengan cmd = <code>ALL</code></p>
+    </div>
+
+    <script>
+        async function testTracking() {
+            const emailId = document.getElementById('emailId').value.trim();
+            const participantId = document.getElementById('participantId').value.trim();
+            const resultDiv = document.getElementById('result');
+            
+            if (!emailId) {
+                resultDiv.innerHTML = '<div class="result error">❌ Email ID is required!</div>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<div class="result">⏳ Testing tracking pixel...</div>';
+            
+            const supabaseUrl = 'https://xtrognfmzyzqhsfvtgne.supabase.co';
+            const trackingUrl = `${supabaseUrl}/functions/v1/track-email?id=${emailId}&pid=${participantId}`;
+            
+            console.log('🔍 Testing tracking URL:', trackingUrl);
+            
+            try {
+                // Load the tracking pixel
+                const img = new Image();
+                
+                img.onload = function() {
+                    resultDiv.innerHTML = `
+                        <div class="result">
+                            ✅ <strong>Tracking pixel loaded successfully!</strong><br><br>
+                            <strong>Tracking URL:</strong><br>
+                            <code>${trackingUrl}</code><br><br>
+                            <strong>Next Steps:</strong><br>
+                            1. Check Supabase Edge Function logs for detailed output<br>
+                            2. Refresh Email History page<br>
+                            3. Status should change to "Opened" with timestamp<br><br>
+                            <strong>Expected in logs:</strong><br>
+                            - "Attempting to update email log: ${emailId}"<br>
+                            - "Existing record: {...}"<br>
+                            - "✅ Email log updated successfully"<br><br>
+                            If you see errors in logs, check RLS policies!
+                        </div>
+                    `;
+                };
+                
+                img.onerror = function() {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            ❌ <strong>Failed to load tracking pixel</strong><br><br>
+                            This might be normal (edge function returns image even on error).<br>
+                            Check the Edge Function logs for the real status.
+                        </div>
+                    `;
+                };
+                
+                img.src = trackingUrl;
+                
+                // Also try fetch to see response
+                setTimeout(async () => {
+                    try {
+                        const response = await fetch(trackingUrl);
+                        console.log('📡 Fetch response status:', response.status);
+                        console.log('📡 Fetch response headers:', [...response.headers.entries()]);
+                        
+                        if (response.ok) {
+                            console.log('✅ Edge function responded successfully');
+                        }
+                    } catch (e) {
+                        console.error('❌ Fetch error:', e);
+                    }
+                }, 500);
+                
+            } catch (error) {
+                console.error('Error testing tracking:', error);
+                resultDiv.innerHTML = `
+                    <div class="result error">
+                        ❌ Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Auto-load test on page load for quick testing
+        console.log('📧 Email Tracking Debug Tool Ready');
+        console.log('💡 TIP: Open browser DevTools Console to see detailed logs');
+    </script>
+</body>
+</html>

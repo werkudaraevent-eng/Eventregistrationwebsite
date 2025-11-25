@@ -35,7 +35,8 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
     company: true,
     position: true,
     attendance: true,
-    registered: true
+    registered: true,
+    emailStatus: true
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +249,8 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
     { key: 'company' as keyof ColumnVisibility, name: 'Company', description: 'Company name', alwaysVisible: false },
     { key: 'position' as keyof ColumnVisibility, name: 'Position', description: 'Job title/position', alwaysVisible: false },
     { key: 'attendance' as keyof ColumnVisibility, name: 'Attendance', description: 'Session check-ins and selected sessions', alwaysVisible: false },
-    { key: 'registered' as keyof ColumnVisibility, name: 'Registered At', description: 'Registration timestamp', alwaysVisible: false }
+    { key: 'registered' as keyof ColumnVisibility, name: 'Registered At', description: 'Registration timestamp', alwaysVisible: false },
+    { key: 'emailStatus' as keyof ColumnVisibility, name: 'Campaign/Email Status', description: 'Email campaigns sent to participant', alwaysVisible: false }
   ];
 
   return (

@@ -72,6 +72,23 @@ export interface BrandingSettings {
   primaryColor: string;
   backgroundColor: string;
   fontFamily: string;
+  // Enhanced appearance settings
+  fontColor?: string;
+  buttonColor?: string;
+  buttonText?: string;
+  formWidth?: 'narrow' | 'medium' | 'wide';
+  borderRadius?: 'none' | 'small' | 'medium' | 'large';
+  fontSize?: 'small' | 'medium' | 'large';
+  successMessage?: string;
+  footerText?: string;
+  footerColor?: string; // New: Footer text color
+  // Header display settings
+  showDate?: boolean; // Show event date in header
+  showLocation?: boolean; // Show event location in header
+  showDescription?: boolean; // Show event description in header
+  // Email confirmation settings
+  autoSendConfirmation?: boolean; // Auto send confirmation email after registration
+  confirmationTemplateId?: string; // Email template ID for confirmation
 }
 
 export interface BadgeSettings {

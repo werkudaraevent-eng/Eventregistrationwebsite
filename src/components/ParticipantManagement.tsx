@@ -2,15 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
+import { TableBody, TableCell, TableHead, TableRow } from './ui/table';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, Filter, X } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { ColumnManagement } from './ColumnManagement';
 import { supabase } from '../utils/supabase/client';
+import { createParticipant } from '../utils/supabaseDataLayer';
 
 interface Participant {
   id: string;
@@ -23,6 +24,7 @@ interface Participant {
   registeredAt: string;
   attendance: Array<{ agendaItem: string; timestamp: string }>;
   customData?: Record<string, any>;
+  qr_code_url?: string;
   email_status?: 'not_sent' | 'sent' | 'failed' | 'pending';
   last_email_sent_at?: string;
   email_send_count?: number;
@@ -45,6 +47,7 @@ interface ColumnVisibility {
   position: boolean;
   attendance: boolean;
   registered: boolean;
+  emailStatus: boolean;
 }
 
 interface ParticipantManagementProps {
@@ -61,10 +64,27 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     company: true,
     position: true,
     attendance: true,
-    registered: true
+    registered: true,
+    emailStatus: true
   });
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  
+  // Advanced column filters - staging vs applied
+  const [stagingFilters, setStagingFilters] = useState<Array<{
+    id: string;
+    column: string;
+    operator: 'contains' | 'equals' | 'starts-with' | 'ends-with' | 'not-empty' | 'empty';
+    value: string;
+  }>>([]);
+  const [columnFilters, setColumnFilters] = useState<Array<{
+    id: string;
+    column: string;
+    operator: 'contains' | 'equals' | 'starts-with' | 'ends-with' | 'not-empty' | 'empty';
+    value: string;
+  }>>([]);
+  
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
@@ -74,6 +94,15 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  // Email confirmation for new participants
+  const [sendConfirmationEmail, setSendConfirmationEmail] = useState(false);
+  
+  // Selection states
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState<Set<string>>(new Set());
+  const [isBulkEmailDialogOpen, setIsBulkEmailDialogOpen] = useState(false);
+  const [bulkEmailTemplateId, setBulkEmailTemplateId] = useState<string>('');
+  const [isSendingBulkEmail, setIsSendingBulkEmail] = useState(false);
+  
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -82,18 +111,18 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const [sortField, setSortField] = useState<string>('registeredAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
-  // Column resize states
+  // Column resize states - Optimized for better UX
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
-    id: 130,
-    name: 180,
-    email: 220,
-    phone: 150,
-    company: 180,
-    position: 150,
-    attendance: 120,
-    registered: 130,
-    emailStatus: 150,
-    actions: 180
+    id: 100,
+    name: 150,
+    email: 180,
+    phone: 120,
+    company: 140,
+    position: 130,
+    attendance: 160,
+    registered: 100,
+    emailStatus: 140,
+    actions: 140
   });
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const [startX, setStartX] = useState(0);
@@ -105,6 +134,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [emailTemplates, setEmailTemplates] = useState<any[]>([]);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  
+  // Email campaigns tracking
+  const [participantCampaigns, setParticipantCampaigns] = useState<Record<string, string[]>>({});
   
   // Calculate pagination
   const totalPages = Math.ceil(filteredParticipants.length / rowsPerPage);
@@ -148,7 +180,8 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         position: p.position,
         registeredAt: p.registeredAt,
         attendance: p.attendance || [],
-        customData: p.customData || {}
+        customData: p.customData || {},
+        qr_code_url: p.qr_code_url || p.qrCodeUrl // Support both snake_case and camelCase
       }));
       
       console.log('[SUPABASE] Converted participants:', convertedParticipants);
@@ -196,7 +229,14 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   useEffect(() => {
     fetchParticipants();
     loadColumnSettings();
+    loadEmailTemplates();
   }, [eventId, accessToken]);
+
+  useEffect(() => {
+    if (participants.length > 0) {
+      fetchParticipantCampaigns();
+    }
+  }, [participants]);
 
   // Supabase Realtime subscription - smooth real-time updates
   useEffect(() => {
@@ -295,12 +335,147 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   }, [eventId]);
 
   useEffect(() => {
-    let filtered = participants.filter(p => 
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      p.id.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    let filtered = participants;
+    
+    // Global search across all fields
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(p => {
+        // Search in basic fields
+        const basicMatch = 
+          p.name.toLowerCase().includes(query) ||
+          p.email.toLowerCase().includes(query) ||
+          (p.company || '').toLowerCase().includes(query) ||
+          p.id.toLowerCase().includes(query) ||
+          (p.phone || '').toLowerCase().includes(query) ||
+          (p.position || '').toLowerCase().includes(query);
+        
+        // Search in custom fields
+        const customMatch = customFields.some(field => {
+          // Try both field.id (new format) and field.name (legacy format)
+          const value = p.customData?.[field.id] || p.customData?.[field.name];
+          return value && String(value).toLowerCase().includes(query);
+        });
+        
+        // Search in attendance session names
+        const attendanceMatch = (p.attendance || []).some(record => 
+          (record.agendaItem || '').toLowerCase().includes(query)
+        );
+        
+        // Search in campaign names (remove "(pending)" suffix for matching)
+        const campaignMatch = (participantCampaigns[p.id] || []).some(campaign => {
+          const cleanName = campaign.replace(/\s*\(pending\)\s*$/i, '').toLowerCase();
+          return cleanName.includes(query) || campaign.toLowerCase().includes(query);
+        });
+        
+        return basicMatch || customMatch || attendanceMatch || campaignMatch;
+      });
+    }
+    
+    // Apply column-specific filters
+    columnFilters.forEach(filter => {
+      filtered = filtered.filter(p => {
+        let value: any;
+        
+        // Get value based on column type
+        if (filter.column.startsWith('custom_')) {
+          const fieldName = filter.column.replace('custom_', '');
+          // Find the field to get its ID
+          const field = customFields.find(f => f.name === fieldName);
+          // Try both field.id (new format) and fieldName (legacy format)
+          value = field ? (p.customData?.[field.id] || p.customData?.[fieldName] || '') : '';
+        } else if (filter.column === 'attendance') {
+          // For attendance, search in session names (agendaItem), not just count
+          const attendanceRecords = p.attendance || [];
+          
+          // Handle special operators
+          if (filter.operator === 'not-empty') {
+            return attendanceRecords.length > 0;
+          }
+          if (filter.operator === 'empty') {
+            return attendanceRecords.length === 0;
+          }
+          
+          // Search in session names
+          const sessionNames = attendanceRecords.map(r => r.agendaItem || '').join(' ').toLowerCase();
+          const filterValue = filter.value.toLowerCase();
+          
+          switch (filter.operator) {
+            case 'contains':
+              return sessionNames.includes(filterValue);
+            case 'equals':
+              return attendanceRecords.some(r => (r.agendaItem || '').toLowerCase() === filterValue);
+            case 'starts-with':
+              return attendanceRecords.some(r => (r.agendaItem || '').toLowerCase().startsWith(filterValue));
+            case 'ends-with':
+              return attendanceRecords.some(r => (r.agendaItem || '').toLowerCase().endsWith(filterValue));
+            default:
+              return true;
+          }
+        } else if (filter.column === 'campaigns') {
+          // For campaigns, search in campaign names, not just count
+          const campaigns = participantCampaigns[p.id] || [];
+          
+          // Handle special operators
+          if (filter.operator === 'not-empty') {
+            return campaigns.length > 0;
+          }
+          if (filter.operator === 'empty') {
+            return campaigns.length === 0;
+          }
+          
+          // Search in campaign names (also match campaigns with "(pending)" suffix)
+          // Remove "(pending)" from campaign names for comparison
+          const cleanCampaignNames = campaigns.map(c => c.replace(/\s*\(pending\)\s*$/i, '')).join(' ').toLowerCase();
+          const filterValue = filter.value.toLowerCase();
+          
+          switch (filter.operator) {
+            case 'contains':
+              return cleanCampaignNames.includes(filterValue);
+            case 'equals':
+              return campaigns.some(c => {
+                const cleanName = c.replace(/\s*\(pending\)\s*$/i, '').toLowerCase();
+                return cleanName === filterValue;
+              });
+            case 'starts-with':
+              return campaigns.some(c => {
+                const cleanName = c.replace(/\s*\(pending\)\s*$/i, '').toLowerCase();
+                return cleanName.startsWith(filterValue);
+              });
+            case 'ends-with':
+              return campaigns.some(c => {
+                const cleanName = c.replace(/\s*\(pending\)\s*$/i, '').toLowerCase();
+                return cleanName.endsWith(filterValue);
+              });
+            default:
+              return true;
+          }
+        } else {
+          value = (p as any)[filter.column] || '';
+        }
+        
+        const strValue = String(value).toLowerCase();
+        const filterValue = filter.value.toLowerCase();
+        
+        // Apply operator
+        switch (filter.operator) {
+          case 'contains':
+            return strValue.includes(filterValue);
+          case 'equals':
+            return strValue === filterValue;
+          case 'starts-with':
+            return strValue.startsWith(filterValue);
+          case 'ends-with':
+            return strValue.endsWith(filterValue);
+          case 'not-empty':
+            return strValue.trim() !== '';
+          case 'empty':
+            return strValue.trim() === '';
+          default:
+            return true;
+        }
+      });
+    });
     
     // Apply sorting
     filtered = filtered.sort((a, b) => {
@@ -316,8 +491,11 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         bValue = (b.attendance || []).length;
       } else if (sortField.startsWith('custom_')) {
         const fieldName = sortField.replace('custom_', '');
-        aValue = a.customData?.[fieldName] || '';
-        bValue = b.customData?.[fieldName] || '';
+        // Find the field to get its ID
+        const field = customFields.find(f => f.name === fieldName);
+        // Try both field.id (new format) and fieldName (legacy format)
+        aValue = field ? (a.customData?.[field.id] || a.customData?.[fieldName] || '') : '';
+        bValue = field ? (b.customData?.[field.id] || b.customData?.[fieldName] || '') : '';
       } else {
         aValue = (a as any)[sortField] || '';
         bValue = (b as any)[sortField] || '';
@@ -335,8 +513,8 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     });
     
     setFilteredParticipants(filtered);
-    setCurrentPage(1); // Reset to first page when search changes
-  }, [searchQuery, participants, sortField, sortDirection]);
+    setCurrentPage(1); // Reset to first page when search/filter changes
+  }, [searchQuery, participants, sortField, sortDirection, columnFilters, participantCampaigns, customFields]);
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -403,6 +581,31 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     </div>
   );
 
+  // Selection handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(paginatedParticipants.map(p => p.id));
+      setSelectedParticipantIds(allIds);
+    } else {
+      setSelectedParticipantIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSelection = new Set(selectedParticipantIds);
+    if (checked) {
+      newSelection.add(id);
+    } else {
+      newSelection.delete(id);
+    }
+    setSelectedParticipantIds(newSelection);
+  };
+
+  const isAllSelected = paginatedParticipants.length > 0 && 
+    paginatedParticipants.every(p => selectedParticipantIds.has(p.id));
+  
+  const isSomeSelected = paginatedParticipants.some(p => selectedParticipantIds.has(p.id)) && !isAllSelected;
+
   // Load email templates
   const loadEmailTemplates = async () => {
     try {
@@ -467,35 +670,122 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       };
 
       const personalizedSubject = replacePlaceholders(template.subject);
-      const personalizedBody = replacePlaceholders(template.body);
+      let personalizedBody = replacePlaceholders(template.body);
 
       console.log('=== SENDING EMAIL ===');
       console.log('To:', selectedParticipant.email);
       console.log('Subject:', personalizedSubject);
 
-      // Send email via Supabase Edge Function
-      const { data, error: sendError } = await supabase.functions.invoke('send-email', {
+      // Prepare attachments array (URLs only)
+      let emailAttachments = template.attachments || [];
+
+      console.log('[ParticipantManagement] 🔍 Checking QR code:', {
+        templateIncludeQR: template.include_qr_code,
+        participantQRUrl: selectedParticipant.qr_code_url,
+        participantId: selectedParticipant.id,
+        participantEmail: selectedParticipant.email
+      });
+
+      // Add participant QR code from database if template requires it
+      if (template.include_qr_code && selectedParticipant.qr_code_url) {
+        console.log('[ParticipantManagement] ✅ Adding QR code from database:', selectedParticipant.qr_code_url);
+        emailAttachments = [
+          ...emailAttachments,
+          selectedParticipant.qr_code_url
+        ];
+      } else if (template.include_qr_code && !selectedParticipant.qr_code_url) {
+        console.warn('[ParticipantManagement] ⚠️ QR code requested but not found in participant data for:', selectedParticipant.id);
+      }
+
+      console.log('[ParticipantManagement] 📧 Sending email with params:', {
+        to: selectedParticipant.email,
+        participantId: selectedParticipant.id,
+        templateId: template.id,
+        attachmentsArray: emailAttachments,
+        attachmentsCount: emailAttachments?.length || 0,
+        includeQR: template.include_qr_code
+      });
+
+      // Create email log first to get tracking ID
+      const { data: emailLogData, error: logCreateError } = await supabase
+        .from('participant_emails')
+        .insert({
+          participant_id: selectedParticipant.id,
+          template_id: template.id,
+          template_name: template.name,
+          subject: personalizedSubject,
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      let emailLogId = emailLogData?.id;
+
+      // Add tracking pixel if email log created successfully
+      if (emailLogId) {
+        const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
+        
+        // Method 1: Tracking pixel (may be blocked by Gmail)
+        const trackingPixel = `<img src="${supabaseUrl}/functions/v1/track-email?id=${emailLogId}&pid=${selectedParticipant.id}" width="1" height="1" style="display:none;" alt="" />`;
+        
+        // Method 2: Add tracking to any existing links (more reliable)
+        // Wrap any http/https links with tracking
+        let bodyWithTracking = personalizedBody;
+        
+        // Find all clickable links and add tracking parameter
+        const linkRegex = /(https?:\/\/[^\s<>"]+)/gi;
+        bodyWithTracking = bodyWithTracking.replace(linkRegex, (match) => {
+          // Add tracking parameter to links
+          const separator = match.includes('?') ? '&' : '?';
+          return `${match}${separator}_track=${emailLogId}`;
+        });
+        
+        // Add tracking pixel at the end
+        bodyWithTracking = bodyWithTracking + trackingPixel;
+        
+        console.log('[ParticipantManagement] ✅ Dual tracking added (pixel + links)');
+        console.log('[ParticipantManagement] 📍 Tracking URL:', `${supabaseUrl}/functions/v1/track-email?id=${emailLogId}&pid=${selectedParticipant.id}`);
+        console.log('[ParticipantManagement] 📧 Email Log ID:', emailLogId);
+        
+        personalizedBody = bodyWithTracking;
+      }
+
+      // Send email via Supabase Edge Function with timeout
+      console.log('[ParticipantManagement] 🚀 Invoking send-email function...');
+      
+      const sendEmailPromise = supabase.functions.invoke('send-email', {
         body: {
           to: selectedParticipant.email,
           subject: personalizedSubject,
           html: personalizedBody,
           participantId: selectedParticipant.id,
-          templateId: template.id
+          templateId: template.id,
+          attachments: emailAttachments
         }
       });
+
+      // Add 30 second timeout
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email sending timeout after 30 seconds')), 30000)
+      );
+
+      const { data, error: sendError } = await Promise.race([
+        sendEmailPromise,
+        timeoutPromise
+      ]) as any;
 
       if (sendError) {
         console.error('❌ Failed to send email:', sendError);
         
-        // Update status to failed
-        await supabase.rpc('update_participant_email_status', {
-          p_participant_id: selectedParticipant.id,
-          p_template_id: template.id,
-          p_template_name: template.name,
-          p_subject: personalizedSubject,
-          p_status: 'failed',
-          p_error_message: sendError.message || 'Failed to send email'
-        });
+        // Update email log to failed
+        if (emailLogId) {
+          await supabase.from('participant_emails')
+            .update({
+              status: 'failed',
+              error_message: sendError.message || 'Failed to send email'
+            })
+            .eq('id', emailLogId);
+        }
 
         alert(`❌ Failed to send email to ${selectedParticipant.name}\n\nError: ${sendError.message}`);
         return;
@@ -503,18 +793,19 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
 
       console.log('✅ Email sent successfully:', data);
 
-      // Update participant email status to sent
-      await supabase.rpc('update_participant_email_status', {
-        p_participant_id: selectedParticipant.id,
-        p_template_id: template.id,
-        p_template_name: template.name,
-        p_subject: personalizedSubject,
-        p_status: 'sent',
-        p_error_message: null
-      });
+      // Update email log to sent
+      if (emailLogId) {
+        await supabase.from('participant_emails')
+          .update({ status: 'sent' })
+          .eq('id', emailLogId);
+        console.log('[ParticipantManagement] ✅ Email log updated to sent');
+      }
 
       // Refresh participants to show updated status
       await fetchParticipants();
+      
+      // Refresh campaigns
+      await fetchParticipantCampaigns();
 
       alert(`✅ Email sent successfully to ${selectedParticipant.name}!`);
       
@@ -529,35 +820,165 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     }
   };
 
-  // Get email status badge
-  const getEmailStatusBadge = (participant: Participant) => {
-    const status = participant.email_status || 'not_sent';
-    
-    const config: Record<string, { label: string; icon: any; className: string }> = {
-      not_sent: { label: 'Not Sent', icon: Mail, className: 'bg-gray-100 text-gray-700 border-gray-300' },
-      sent: { label: 'Sent', icon: CheckCircle, className: 'bg-green-100 text-green-700 border-green-300' },
-      failed: { label: 'Failed', icon: XCircle, className: 'bg-red-100 text-red-700 border-red-300' },
-      pending: { label: 'Pending', icon: Clock, className: 'bg-yellow-100 text-yellow-700 border-yellow-300' }
-    };
+  // Fetch email campaigns for all participants
+  const fetchParticipantCampaigns = async () => {
+    try {
+      const participantIds = participants.map(p => p.id);
+      if (participantIds.length === 0) return;
 
-    const { label, icon: Icon, className } = config[status];
+      console.log('[ParticipantCampaigns] Fetching for participant IDs:', participantIds.length);
+
+      // Get all email logs for these participants (including failed)
+      const { data: emailLogs, error: emailLogsError } = await supabase
+        .from('participant_emails')
+        .select('participant_id, campaign_id, status')
+        .in('participant_id', participantIds);
+
+      if (emailLogsError) {
+        console.error('[ParticipantCampaigns] Error fetching email logs:', emailLogsError);
+        return;
+      }
+
+      console.log('[ParticipantCampaigns] Email logs fetched:', emailLogs?.length);
+
+      // Get unique campaign IDs from logs
+      const campaignIds = [...new Set(emailLogs?.map(log => log.campaign_id).filter(Boolean))] as string[];
+      console.log('[ParticipantCampaigns] Unique campaign IDs:', campaignIds);
+
+      // Fetch campaign names
+      let campaignNamesMap: Record<string, string> = {};
+      
+      if (campaignIds.length > 0) {
+        const { data: campaigns, error: campaignsError } = await supabase
+          .from('campaigns')
+          .select('id, name')
+          .in('id', campaignIds);
+
+        if (campaignsError) {
+          console.error('[ParticipantCampaigns] Error fetching campaigns:', campaignsError);
+          return;
+        }
+
+        console.log('[ParticipantCampaigns] Campaigns fetched:', campaigns?.length);
+
+        campaigns?.forEach(campaign => {
+          campaignNamesMap[campaign.id] = campaign.name;
+        });
+      }
+
+      // Build mapping from participant_id to campaigns
+      const campaignsByParticipant: Record<string, string[]> = {};
+
+      emailLogs?.forEach(log => {
+        if (!log.campaign_id) return;
+
+        if (!campaignsByParticipant[log.participant_id]) {
+          campaignsByParticipant[log.participant_id] = [];
+        }
+
+        const campaignName = campaignNamesMap[log.campaign_id] || `Campaign ${log.campaign_id.substring(0, 8)}`;
+        
+        // Add status suffix based on email status
+        let displayName = campaignName;
+        if (log.status === 'pending' || log.status === 'queued' || log.status === 'scheduled') {
+          displayName = `${campaignName} (pending)`;
+        } else if (log.status === 'failed') {
+          displayName = `${campaignName} (failed)`;
+        }
+        // sent/delivered/opened: no suffix
+
+        // Add unique campaign names only
+        if (!campaignsByParticipant[log.participant_id].includes(displayName)) {
+          campaignsByParticipant[log.participant_id].push(displayName);
+        }
+      });
+
+      setParticipantCampaigns(campaignsByParticipant);
+      console.log('[ParticipantCampaigns] Final campaigns by participant:', campaignsByParticipant);
+    } catch (error) {
+      console.error('[ParticipantCampaigns] Error:', error);
+    }
+  };
+
+  // Get email campaign tags for participant
+  const getEmailCampaignTags = (participant: Participant) => {
+    const campaigns = participantCampaigns[participant.id] || [];
+    
+    if (campaigns.length === 0) {
+      return (
+        <Badge className="bg-gray-100 text-gray-500 border-gray-300 border text-xs">
+          No campaigns
+        </Badge>
+      );
+    }
 
     return (
-      <div className="flex flex-col gap-1">
-        <Badge className={`${className} border flex items-center gap-1 w-fit`}>
-          <Icon className="h-3 w-3" />
-          {label}
+      <div className="flex flex-wrap gap-1">
+        {campaigns.map((campaign, index) => {
+          // Determine badge color based on status
+          const isPending = campaign.includes('(pending)') || campaign.includes('(not sent)');
+          const isFailed = campaign.includes('(failed)');
+          
+          let badgeClass = "bg-blue-100 text-blue-700 border-blue-300 border text-xs"; // Default: sent/delivered
+          let tooltipText = "Email terkirim";
+          
+          if (isPending) {
+            badgeClass = "bg-yellow-100 text-yellow-700 border-yellow-300 border text-xs";
+            tooltipText = campaign.includes('(not sent)') ? "Terdaftar di campaign, email belum dikirim" : "Email dalam antrian (pending)";
+          } else if (isFailed) {
+            badgeClass = "bg-red-100 text-red-700 border-red-300 border text-xs";
+            tooltipText = "Email gagal terkirim";
+          }
+          
+          return (
+            <Badge 
+              key={index}
+              className={badgeClass}
+              title={tooltipText}
+            >
+              {campaign}
+            </Badge>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // Get attendance session tags for participant
+  const getAttendanceTags = (participant: Participant) => {
+    const attendanceRecords = participant.attendance || [];
+    
+    if (attendanceRecords.length === 0) {
+      return (
+        <Badge className="bg-gray-100 text-gray-500 border-gray-300 border text-xs">
+          0 sessions
         </Badge>
-        {participant.last_email_sent_at && (
-          <span className="text-xs text-gray-500">
-            {new Date(participant.last_email_sent_at).toLocaleDateString()}
-          </span>
-        )}
-        {participant.email_send_count && participant.email_send_count > 0 && (
-          <span className="text-xs text-gray-500">
-            {participant.email_send_count} sent
-          </span>
-        )}
+      );
+    }
+
+    return (
+      <div className="flex flex-wrap gap-1">
+        {attendanceRecords.map((record, index) => {
+          // agendaItem contains the session title/name directly, not an ID
+          const sessionName = record.agendaItem || 'Unknown Session';
+          const timestamp = new Date(record.timestamp).toLocaleString('id-ID', {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          
+          return (
+            <Badge 
+              key={index}
+              className="bg-green-100 text-green-700 border-green-300 border text-xs"
+              title={`Checked in at ${timestamp}`}
+            >
+              {sessionName}
+            </Badge>
+          );
+        })}
       </div>
     );
   };
@@ -569,32 +990,91 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     try {
       console.log('[SUPABASE] Adding participant:', formData);
       
-      const participantId = `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const participant = {
-        id: participantId,
+      // Use createParticipant from supabaseDataLayer which includes QR generation
+      const newParticipant = await createParticipant({
         eventId: eventId,
         name: formData.name,
         email: formData.email,
         phone: formData.phone || '',
         company: formData.company || '',
         position: formData.position || '',
-        registeredAt: new Date().toISOString(),
-        attendance: [],
         customData: formData.customData || {}
-      };
+      });
       
-      const { error } = await supabase
-        .from('participants')
-        .insert([participant]);
+      console.log('[SUPABASE] Participant added successfully with QR:', newParticipant);
       
-      if (error) {
-        throw new Error(`Failed to add participant: ${error.message}`);
+      // Send confirmation email if enabled
+      if (sendConfirmationEmail && selectedTemplateId) {
+        try {
+          // Fetch template
+          const { data: template, error: templateError } = await supabase
+            .from('email_templates')
+            .select('*')
+            .eq('id', selectedTemplateId)
+            .single();
+
+          if (templateError || !template) {
+            console.error('[EMAIL] Template fetch error:', templateError);
+            alert(`Participant added, but template not found`);
+          } else {
+            // Personalize template
+            const personalizedSubject = template.subject
+              .replace(/\{\{name\}\}/g, formData.name)
+              .replace(/\{\{email\}\}/g, formData.email);
+            
+            const personalizedBody = template.body
+              .replace(/\{\{name\}\}/g, formData.name)
+              .replace(/\{\{email\}\}/g, formData.email)
+              .replace(/\{\{participant_id\}\}/g, newParticipant.id);
+
+            // Prepare attachments
+            let emailAttachments: string[] = template.attachments || [];
+            if (template.include_qr_code && newParticipant.qr_code_url) {
+              emailAttachments = [...emailAttachments, newParticipant.qr_code_url];
+            }
+
+            // Send email
+            const { error: emailError } = await supabase.functions.invoke('send-email', {
+              body: {
+                to: formData.email,
+                subject: personalizedSubject,
+                html: personalizedBody,
+                participantId: newParticipant.id,
+                templateId: template.id,
+                attachments: emailAttachments
+              }
+            });
+
+            // Log to participant_emails
+            const emailStatus = emailError ? 'failed' : 'sent';
+            await supabase.from('participant_emails').insert({
+              participant_id: newParticipant.id,
+              template_id: template.id,
+              template_name: template.name,
+              subject: personalizedSubject,
+              status: emailStatus,
+              error_message: emailError ? JSON.stringify(emailError) : null
+            });
+
+            if (emailError) {
+              console.error('[EMAIL] Confirmation send error:', emailError);
+              alert(`Participant added, but email failed to send: ${emailError.message}`);
+            } else {
+              console.log('[EMAIL] Confirmation sent to:', formData.email);
+              alert('Participant added successfully and confirmation email sent!');
+            }
+          }
+        } catch (emailErr: any) {
+          console.error('[EMAIL] Error:', emailErr);
+          alert(`Participant added, but email error: ${emailErr.message}`);
+        }
+      } else {
+        alert('Participant added successfully!');
       }
       
-      console.log('[SUPABASE] Participant added successfully');
-      alert('Participant added successfully!');
       setFormData({ name: '', email: '', phone: '', company: '', position: '', customData: {} });
+      setSendConfirmationEmail(false);
+      setSelectedTemplateId('');
       setIsAddDialogOpen(false);
       await fetchParticipants();
       
@@ -759,6 +1239,140 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     } catch (err: any) {
       console.error('[SUPABASE] Error deleting participant:', err);
       alert('Failed to delete participant');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      const idsToDelete = Array.from(selectedParticipantIds);
+      console.log('[SUPABASE] Bulk deleting participants:', idsToDelete);
+      
+      const { error } = await supabase
+        .from('participants')
+        .delete()
+        .in('id', idsToDelete);
+      
+      if (error) {
+        throw new Error(`Failed to delete participants: ${error.message}`);
+      }
+      
+      setSelectedParticipantIds(new Set());
+      await fetchParticipants();
+      alert(`Successfully deleted ${idsToDelete.length} participants`);
+    } catch (err: any) {
+      console.error('[SUPABASE] Error bulk deleting participants:', err);
+      alert('Failed to delete participants');
+    }
+  };
+
+  const handleBulkEmail = () => {
+    // Open dialog to select template and send to all selected participants
+    setIsBulkEmailDialogOpen(true);
+  };
+
+  const handleSendBulkEmail = async () => {
+    if (!bulkEmailTemplateId) {
+      alert('Please select a template');
+      return;
+    }
+
+    try {
+      setIsSendingBulkEmail(true);
+      const selectedParticipants = participants.filter(p => 
+        selectedParticipantIds.has(p.id)
+      );
+
+      // Get template
+      const template = emailTemplates.find(t => t.id === bulkEmailTemplateId);
+      if (!template) {
+        throw new Error('Template not found');
+      }
+
+      // Get event details
+      const { data: eventData } = await supabase
+        .from('events')
+        .select('*')
+        .eq('id', eventId)
+        .single();
+
+      let successCount = 0;
+      let failCount = 0;
+
+      // Send email to each selected participant
+      for (const participant of selectedParticipants) {
+        try {
+          // Replace placeholders
+          const replacePlaceholders = (text: string) => {
+            return text
+              .replace(/\{\{name\}\}/g, participant.name || '')
+              .replace(/\{\{email\}\}/g, participant.email || '')
+              .replace(/\{\{phone\}\}/g, participant.phone || '')
+              .replace(/\{\{company\}\}/g, participant.company || '')
+              .replace(/\{\{position\}\}/g, participant.position || '')
+              .replace(/\{\{event_name\}\}/g, eventData?.name || '')
+              .replace(/\{\{event_date\}\}/g, eventData?.startDate || '')
+              .replace(/\{\{participant_id\}\}/g, participant.id || '');
+          };
+
+          const personalizedSubject = replacePlaceholders(template.subject);
+          const personalizedBody = replacePlaceholders(template.body);
+
+          // Prepare attachments array
+          let emailAttachments = template.attachments || [];
+
+          // Add participant QR code if template requires it
+          if (template.include_qr_code && participant.qr_code_url) {
+            emailAttachments = [...emailAttachments, participant.qr_code_url];
+          }
+
+          // Send email via Supabase Edge Function
+          const { error: sendError } = await supabase.functions.invoke('send-email', {
+            body: {
+              to: participant.email,
+              subject: personalizedSubject,
+              html: personalizedBody,
+              participantId: participant.id,
+              templateId: template.id,
+              attachments: emailAttachments
+            }
+          });
+
+          // Log to participant_emails
+          const emailStatus = sendError ? 'failed' : 'sent';
+          await supabase.from('participant_emails').insert({
+            participant_id: participant.id,
+            template_id: template.id,
+            template_name: template.name,
+            subject: personalizedSubject,
+            status: emailStatus,
+            error_message: sendError ? JSON.stringify(sendError) : null
+          });
+
+          if (sendError) {
+            throw new Error(sendError.message || 'Failed to send email');
+          }
+
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to send email to ${participant.email}:`, err);
+          failCount++;
+        }
+      }
+
+      setIsSendingBulkEmail(false);
+      setIsBulkEmailDialogOpen(false);
+      setBulkEmailTemplateId('');
+      setSelectedParticipantIds(new Set());
+
+      if (failCount > 0) {
+        alert(`Sent ${successCount} emails successfully, ${failCount} failed`);
+      } else {
+        alert(`Successfully sent ${successCount} emails`);
+      }
+    } catch (err: any) {
+      console.error('Error sending bulk emails:', err);
+      setIsSendingBulkEmail(false);
+      alert('Failed to send emails');
     }
   };
 
@@ -980,24 +1594,24 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           </Label>
                           {field.type === 'textarea' ? (
                             <textarea
-                              id={`add-custom-${field.name}`}
+                              id={`add-custom-${field.id}`}
                               className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                               placeholder={`Enter ${field.label.toLowerCase()}`}
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                customData: { ...prev.customData, [field.name]: e.target.value }
+                                customData: { ...prev.customData, [field.id]: e.target.value }
                               }))}
                               required={field.required}
                             />
                           ) : field.type === 'select' && field.options ? (
                             <select
-                              id={`add-custom-${field.name}`}
+                              id={`add-custom-${field.id}`}
                               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                customData: { ...prev.customData, [field.name]: e.target.value }
+                                customData: { ...prev.customData, [field.id]: e.target.value }
                               }))}
                               required={field.required}
                             >
@@ -1008,25 +1622,25 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                             </select>
                           ) : field.type === 'date' ? (
                             <Input
-                              id={`add-custom-${field.name}`}
+                              id={`add-custom-${field.id}`}
                               type="date"
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                customData: { ...prev.customData, [field.name]: e.target.value }
+                                customData: { ...prev.customData, [field.id]: e.target.value }
                               }))}
                               required={field.required}
                               className="w-full"
                             />
                           ) : (
                             <Input
-                              id={`add-custom-${field.name}`}
+                              id={`add-custom-${field.id}`}
                               type={field.type}
                               placeholder={`Enter ${field.label.toLowerCase()}`}
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
-                                customData: { ...prev.customData, [field.name]: e.target.value }
+                                customData: { ...prev.customData, [field.id]: e.target.value }
                               }))}
                               required={field.required}
                             />
@@ -1035,6 +1649,54 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       ))}
                     </div>
                   )}
+
+                  {/* Email Confirmation Section */}
+                  <div className="border-t pt-4 space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id="send-confirmation"
+                          checked={sendConfirmationEmail}
+                          onChange={(e) => setSendConfirmationEmail(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 cursor-pointer"
+                        />
+                        <Label htmlFor="send-confirmation" className="cursor-pointer font-medium">
+                          Send Confirmation Email
+                        </Label>
+                      </div>
+                    </div>
+
+                    {sendConfirmationEmail && (
+                      <div className="space-y-2 pl-4 border-l-2 border-blue-300">
+                        <Label>Email Template</Label>
+                        <Select
+                          value={selectedTemplateId}
+                          onValueChange={setSelectedTemplateId}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select email template..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {emailTemplates.length === 0 ? (
+                              <SelectItem value="" disabled>No templates available</SelectItem>
+                            ) : (
+                              emailTemplates.map((template: any) => (
+                                <SelectItem key={template.id} value={template.id}>
+                                  {template.name} - {template.subject}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        {emailTemplates.length === 0 && (
+                          <p className="text-xs text-amber-600">
+                            ⚠️ Create email templates in Email Center first
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   <Button type="submit" className="w-full" disabled={isSubmitting}>
                     {isSubmitting ? (
@@ -1135,29 +1797,29 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           </Label>
                           {field.type === 'textarea' ? (
                             <textarea
-                              id={`edit-custom-${field.name}`}
+                              id={`edit-custom-${field.id}`}
                               placeholder={`Enter ${field.label.toLowerCase()}`}
                               className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || formData.customData?.[field.name] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 customData: {
                                   ...prev.customData,
-                                  [field.name]: e.target.value
+                                  [field.id]: e.target.value
                                 }
                               }))}
                               required={field.required}
                             />
                           ) : field.type === 'select' && field.options ? (
                             <select
-                              id={`edit-custom-${field.name}`}
+                              id={`edit-custom-${field.id}`}
                               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || formData.customData?.[field.name] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 customData: {
                                   ...prev.customData,
-                                  [field.name]: e.target.value
+                                  [field.id]: e.target.value
                                 }
                               }))}
                               required={field.required}
@@ -1169,14 +1831,14 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                             </select>
                           ) : field.type === 'date' ? (
                             <Input
-                              id={`edit-custom-${field.name}`}
+                              id={`edit-custom-${field.id}`}
                               type="date"
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || formData.customData?.[field.name] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 customData: {
                                   ...prev.customData,
-                                  [field.name]: e.target.value
+                                  [field.id]: e.target.value
                                 }
                               }))}
                               required={field.required}
@@ -1184,15 +1846,15 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                             />
                           ) : (
                             <Input
-                              id={`edit-custom-${field.name}`}
+                              id={`edit-custom-${field.id}`}
                               type={field.type}
                               placeholder={`Enter ${field.label.toLowerCase()}`}
-                              value={formData.customData?.[field.name] || ''}
+                              value={formData.customData?.[field.id] || formData.customData?.[field.name] || ''}
                               onChange={(e) => setFormData(prev => ({
                                 ...prev,
                                 customData: {
                                   ...prev.customData,
-                                  [field.name]: e.target.value
+                                  [field.id]: e.target.value
                                 }
                               }))}
                               required={field.required}
@@ -1230,30 +1892,371 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                 </form>
               </DialogContent>
             </Dialog>
+
+            {/* Bulk Email Dialog */}
+            <Dialog open={isBulkEmailDialogOpen} onOpenChange={setIsBulkEmailDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Send Email to Selected Participants</DialogTitle>
+                  <DialogDescription>
+                    Send an email template to {selectedParticipantIds.size} selected participants
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">Select Template</label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                      value={bulkEmailTemplateId}
+                      onChange={(e) => setBulkEmailTemplateId(e.target.value)}
+                    >
+                      <option value="">Choose a template</option>
+                      {emailTemplates.map(template => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsBulkEmailDialogOpen(false)}
+                      disabled={isSendingBulkEmail}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleSendBulkEmail}
+                      disabled={!bulkEmailTemplateId || isSendingBulkEmail}
+                      className="gradient-primary"
+                    >
+                      {isSendingBulkEmail ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        `Send to ${selectedParticipantIds.size} Participants`
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </CardHeader>
       <CardContent className="pt-6">
-        <div className="mb-6 flex gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-            <Input
-              placeholder="Search by name, email, company, or ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-12 h-12 bg-gray-50 border-gray-200 focus:bg-white focus:border-purple-300 transition-colors"
-            />
+        <div className="mb-6 space-y-3">
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <Input
+                placeholder="Quick search across all fields..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-12 h-12 bg-gray-50 border-gray-200 focus:bg-white focus:border-purple-300 transition-colors"
+              />
+            </div>
+            
+            <Button 
+              onClick={() => {
+                if (!showAdvancedFilters) {
+                  // Load current filters into staging when opening
+                  // If no filters exist, create one default filter
+                  if (columnFilters.length === 0) {
+                    setStagingFilters([{
+                      id: Date.now().toString(),
+                      column: 'name',
+                      operator: 'contains',
+                      value: ''
+                    }]);
+                  } else {
+                    setStagingFilters([...columnFilters]);
+                  }
+                }
+                setShowAdvancedFilters(!showAdvancedFilters);
+              }}
+              variant="outline" 
+              size="sm" 
+              className={`h-12 border-gray-300 hover:border-gray-400 ${showAdvancedFilters ? 'bg-purple-50 border-purple-300 text-purple-700' : ''}`}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              Filters
+              {columnFilters.length > 0 && (
+                <Badge className="ml-2 bg-purple-600 text-white text-xs px-1.5 py-0.5">
+                  {columnFilters.length}
+                </Badge>
+              )}
+            </Button>
+            
+            {selectedParticipantIds.size > 0 ? (
+              <>
+                <div className="flex items-center px-3 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-200">
+                  <span className="text-sm font-medium">{selectedParticipantIds.size} selected</span>
+                </div>
+                <Button 
+                  onClick={() => {
+                    if (confirm(`Delete ${selectedParticipantIds.size} selected participants?`)) {
+                      handleBulkDelete();
+                    }
+                  }}
+                  variant="outline" 
+                  size="sm" 
+                  className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                >
+                  Delete Selected
+                </Button>
+                <Button 
+                  onClick={handleBulkEmail}
+                  variant="outline" 
+                  size="sm" 
+                  className="border-purple-300 text-purple-600 hover:bg-purple-50 hover:border-purple-400"
+                >
+                  Email Selected
+                </Button>
+                <Button 
+                  onClick={() => setSelectedParticipantIds(new Set())}
+                  variant="ghost" 
+                  size="sm"
+                  className="text-gray-600"
+                >
+                  Clear Selection
+                </Button>
+              </>
+            ) : (
+              <Button onClick={downloadCSVTemplate} variant="outline" size="sm" className="border-gray-300 hover:border-gray-400">
+                Download Template
+              </Button>
+            )}
           </div>
-          <Button onClick={downloadCSVTemplate} variant="outline" size="sm" className="border-gray-300 hover:border-gray-400">
-            Download Template
-          </Button>
+
+          {/* Advanced Filters Panel */}
+          {showAdvancedFilters && (
+            <div className="bg-white border border-purple-200 rounded-lg p-3 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-purple-900">Column Filters</h3>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setStagingFilters([...stagingFilters, {
+                        id: Date.now().toString(),
+                        column: 'name',
+                        operator: 'contains',
+                        value: ''
+                      }]);
+                    }}
+                    className="h-7 text-xs"
+                  >
+                    <Plus className="h-3 w-3 mr-1" />
+                    Add
+                  </Button>
+                  {stagingFilters.length > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setStagingFilters([])}
+                      className="h-7 text-xs text-gray-600"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Clear
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {stagingFilters.length === 0 ? (
+                <p className="text-xs text-gray-500 text-center py-3">
+                  No filters. Click "Add" to create a filter.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {stagingFilters.map((filter, index) => (
+                    <div key={filter.id} className="flex gap-2 items-center">
+                      {/* Column Selector */}
+                      <select
+                        value={filter.column}
+                        onChange={(e) => {
+                          const updated = [...stagingFilters];
+                          updated[index].column = e.target.value;
+                          setStagingFilters(updated);
+                        }}
+                        className="flex-1 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-purple-300 focus:ring-1 focus:ring-purple-100"
+                      >
+                        <optgroup label="Basic">
+                          <option value="name">Name</option>
+                          <option value="email">Email</option>
+                          <option value="phone">Phone</option>
+                          <option value="company">Company</option>
+                          <option value="position">Position</option>
+                          <option value="id">ID</option>
+                        </optgroup>
+                        {customFields.length > 0 && (
+                          <optgroup label="Custom">
+                            {customFields.map(field => (
+                              <option key={field.id} value={`custom_${field.name}`}>
+                                {field.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <optgroup label="Special">
+                          <option value="attendance">Attendance</option>
+                          <option value="campaigns">Campaigns</option>
+                        </optgroup>
+                      </select>
+
+                      {/* Operator */}
+                      <select
+                        value={filter.operator}
+                        onChange={(e) => {
+                          const updated = [...stagingFilters];
+                          updated[index].operator = e.target.value as any;
+                          setStagingFilters(updated);
+                        }}
+                        className="w-32 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-purple-300 focus:ring-1 focus:ring-purple-100"
+                      >
+                        <option value="contains">Contains</option>
+                        <option value="equals">Equals</option>
+                        <option value="starts-with">Starts with</option>
+                        <option value="ends-with">Ends with</option>
+                        <option value="not-empty">Not empty</option>
+                        <option value="empty">Is empty</option>
+                      </select>
+
+                      {/* Value */}
+                      {filter.operator !== 'not-empty' && filter.operator !== 'empty' && (
+                        <Input
+                          value={filter.value}
+                          onChange={(e) => {
+                            const updated = [...stagingFilters];
+                            updated[index].value = e.target.value;
+                            setStagingFilters(updated);
+                          }}
+                          placeholder="Value..."
+                          className="flex-1 h-8 text-xs"
+                        />
+                      )}
+
+                      {/* Delete */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setStagingFilters(stagingFilters.filter(f => f.id !== filter.id));
+                        }}
+                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200 gap-3">
+                <div className="text-xs text-gray-600 flex-shrink-0">
+                  {stagingFilters.length > 0 ? (
+                    <span>{stagingFilters.length} filter{stagingFilters.length > 1 ? 's' : ''} ready</span>
+                  ) : columnFilters.length > 0 ? (
+                    <span className="text-purple-700 font-medium">{columnFilters.length} active</span>
+                  ) : (
+                    <span className="text-gray-400">No filters</span>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      // Reset values but keep the filter rows
+                      const clearedFilters = stagingFilters.map(f => ({
+                        ...f,
+                        value: ''
+                      }));
+                      setStagingFilters(clearedFilters);
+                      setColumnFilters([]);
+                    }}
+                    className="h-8 px-3 text-xs border-gray-300 text-gray-600"
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setColumnFilters([...stagingFilters]);
+                    }}
+                    size="sm"
+                    className="h-8 px-4 text-xs gradient-primary hover:opacity-90 text-white shadow-md shadow-purple-500/30"
+                  >
+                    Apply
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden" style={{ position: 'relative', zIndex: 0 }}>
-          <div className="overflow-x-auto" style={{ position: 'relative' }}>
-            <Table>
-              <TableHeader>
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm" style={{ position: 'relative', zIndex: 0 }}>
+          {/* Scroll shadows for visual feedback */}
+          <div 
+            className="scroll-shadow-left absolute left-0 top-0 bottom-0 w-8 pointer-events-none transition-opacity duration-300 bg-gradient-to-r from-white via-white/50 to-transparent z-20" 
+            style={{ opacity: 0 }}
+          ></div>
+          <div 
+            className="scroll-shadow-right absolute right-0 top-0 bottom-0 w-8 pointer-events-none transition-opacity duration-300 bg-gradient-to-l from-white via-white/50 to-transparent z-20" 
+            style={{ opacity: 1 }}
+          ></div>
+          
+          <div 
+            className="overflow-x-auto overflow-y-auto" 
+            style={{ 
+              position: 'relative',
+              maxHeight: 'calc(100vh - 400px)', // Adaptive height
+              minHeight: '400px',
+              scrollbarWidth: 'thin',
+              scrollbarColor: '#a855f7 #f3f4f6'
+            }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const leftShadow = document.querySelector('.scroll-shadow-left') as HTMLElement;
+              const rightShadow = document.querySelector('.scroll-shadow-right') as HTMLElement;
+              
+              if (leftShadow) {
+                leftShadow.style.opacity = el.scrollLeft > 10 ? '1' : '0';
+              }
+              if (rightShadow) {
+                rightShadow.style.opacity = (el.scrollLeft < el.scrollWidth - el.clientWidth - 10) ? '1' : '0';
+              }
+            }}
+          >
+            {/* Use native table instead of shadcn Table component for sticky header */}
+            <table className="w-full caption-bottom text-sm" style={{ minWidth: '1300px' }}>
+              <thead style={{ 
+                position: 'sticky', 
+                top: 0, 
+                zIndex: 30, 
+                backgroundColor: 'white', 
+                boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+              }} className="border-b">
                 <TableRow>
+                  {/* Selection Checkbox */}
+                  <TableHead className="w-12">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomeSelected;
+                      }}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 cursor-pointer"
+                    />
+                  </TableHead>
                   <TableHead 
                     className="relative"
                     style={{ width: `${columnWidths.id}px`, minWidth: `${columnWidths.id}px` }}
@@ -1388,44 +2391,62 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <ResizeHandle columnKey="registered" />
                     </TableHead>
                   )}
-                  <TableHead 
-                    className="relative"
-                    style={{ width: `${columnWidths.emailStatus || 150}px`, minWidth: `${columnWidths.emailStatus || 150}px` }}
-                  >
-                    <button
-                      onClick={() => handleSort('email_status')}
-                      className="flex items-center gap-1 font-semibold hover:text-purple-600 transition-colors w-full"
+                  {columnVisibility.emailStatus && (
+                    <TableHead 
+                      className="relative"
+                      style={{ width: `${columnWidths.emailStatus || 250}px`, minWidth: `${columnWidths.emailStatus || 250}px` }}
                     >
-                      Email Status
-                      <SortIcon field="email_status" />
-                    </button>
-                    <ResizeHandle columnKey="emailStatus" />
-                  </TableHead>
+                      <div className="flex items-center gap-1 font-semibold">
+                        Email Campaigns
+                      </div>
+                      <ResizeHandle columnKey="emailStatus" />
+                    </TableHead>
+                  )}
                   <TableHead 
-                    className="text-right sticky right-0 bg-gray-50 z-10"
-                    style={{ width: `${columnWidths.actions}px`, minWidth: `${columnWidths.actions}px` }}
+                    className="text-right sticky right-0 bg-gray-50"
+                    style={{ 
+                      width: `${columnWidths.actions}px`, 
+                      minWidth: `${columnWidths.actions}px`,
+                      position: 'sticky',
+                      right: 0,
+                      zIndex: 40,
+                      backgroundColor: 'rgb(249 250 251)'
+                    }}
                   >
                     Actions
                   </TableHead>
                 </TableRow>
-              </TableHeader>
+              </thead>
             <TableBody>
               {paginatedParticipants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3 + 
+                  <TableCell colSpan={4 + 
                     (columnVisibility.phone ? 1 : 0) +
                     (columnVisibility.company ? 1 : 0) +
                     (columnVisibility.position ? 1 : 0) +
                     customFields.length +
                     (columnVisibility.attendance ? 1 : 0) +
                     (columnVisibility.registered ? 1 : 0) +
+                    (columnVisibility.emailStatus ? 1 : 0) +
                     1} className="text-center text-muted-foreground">
                     {filteredParticipants.length === 0 ? 'No participants found' : 'No results on this page'}
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedParticipants.map((participant) => (
-                  <TableRow key={participant.id}>
+                  <TableRow 
+                    key={participant.id}
+                    className={selectedParticipantIds.has(participant.id) ? 'bg-blue-50' : ''}
+                  >
+                    {/* Selection Checkbox */}
+                    <TableCell className="w-12">
+                      <input
+                        type="checkbox"
+                        checked={selectedParticipantIds.has(participant.id)}
+                        onChange={(e) => handleSelectOne(participant.id, e.target.checked)}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                    </TableCell>
                     <TableCell 
                       className="font-mono text-xs truncate" 
                       title={participant.id}
@@ -1435,12 +2456,14 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     </TableCell>
                     <TableCell 
                       className="font-medium truncate"
+                      title={participant.name}
                       style={{ width: `${columnWidths.name}px`, maxWidth: `${columnWidths.name}px` }}
                     >
                       {participant.name}
                     </TableCell>
                     <TableCell 
                       className="text-sm truncate"
+                      title={participant.email}
                       style={{ width: `${columnWidths.email}px`, maxWidth: `${columnWidths.email}px` }}
                     >
                       {participant.email}
@@ -1456,6 +2479,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     {columnVisibility.company && (
                       <TableCell 
                         className="truncate"
+                        title={participant.company || '-'}
                         style={{ width: `${columnWidths.company}px`, maxWidth: `${columnWidths.company}px` }}
                       >
                         {participant.company || '-'}
@@ -1464,6 +2488,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     {columnVisibility.position && (
                       <TableCell 
                         className="truncate"
+                        title={participant.position || '-'}
                         style={{ width: `${columnWidths.position}px`, maxWidth: `${columnWidths.position}px` }}
                       >
                         {participant.position || '-'}
@@ -1472,13 +2497,16 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     {customFields.map(field => {
                       const columnKey = `custom_${field.name}`;
                       const width = columnWidths[columnKey] || 150;
+                      // Use field.id to access customData, not field.name
+                      const value = participant.customData?.[field.id] || participant.customData?.[field.name] || '-';
                       return (
                         <TableCell 
                           key={field.id}
                           className="truncate"
+                          title={value}
                           style={{ width: `${width}px`, maxWidth: `${width}px` }}
                         >
-                          {participant.customData?.[field.name] || '-'}
+                          {value}
                         </TableCell>
                       );
                     })}
@@ -1486,9 +2514,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <TableCell
                         style={{ width: `${columnWidths.attendance}px`, maxWidth: `${columnWidths.attendance}px` }}
                       >
-                        <Badge variant="secondary">
-                          {(participant.attendance || []).length} sessions
-                        </Badge>
+                        {getAttendanceTags(participant)}
                       </TableCell>
                     )}
                     {columnVisibility.registered && (
@@ -1499,16 +2525,25 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                         {new Date(participant.registeredAt).toLocaleDateString()}
                       </TableCell>
                     )}
+                    {columnVisibility.emailStatus && (
+                      <TableCell 
+                        style={{ width: `${columnWidths.emailStatus}px`, maxWidth: `${columnWidths.emailStatus}px` }}
+                      >
+                        {getEmailCampaignTags(participant)}
+                      </TableCell>
+                    )}
                     <TableCell 
-                      style={{ width: `${columnWidths.emailStatus}px`, maxWidth: `${columnWidths.emailStatus}px` }}
+                      className="text-right sticky right-0 bg-white border-l"
+                      style={{ 
+                        width: `${columnWidths.actions}px`, 
+                        minWidth: `${columnWidths.actions}px`,
+                        position: 'sticky',
+                        right: 0,
+                        zIndex: 20,
+                        backgroundColor: 'white'
+                      }}
                     >
-                      {getEmailStatusBadge(participant)}
-                    </TableCell>
-                    <TableCell 
-                      className="text-right sticky right-0 bg-white border-l z-10"
-                      style={{ width: `${columnWidths.actions}px`, maxWidth: `${columnWidths.actions}px` }}
-                    >
-                      <div className="flex gap-1 justify-end">
+                      <div className="flex gap-1 justify-end items-center" style={{ minWidth: '130px' }}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1540,13 +2575,18 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                 ))
               )}
             </TableBody>
-            </Table>
+            </table>
+          </div>
+          
+          {/* Horizontal scroll hint */}
+          <div className="text-center py-1 text-xs text-gray-400 border-t bg-gray-50/50">
+            ← Scroll horizontally to see more columns →
           </div>
         </div>
 
         {/* Pagination Controls */}
         {filteredParticipants.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
+          <div className="flex items-center justify-between px-4 py-3 bg-white rounded-lg shadow-sm mt-3 border border-gray-200">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">
                 Showing {startIndex + 1} to {Math.min(endIndex, filteredParticipants.length)} of {filteredParticipants.length} participants

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Tracking Pixel Test</title>
+</head>
+<body>
+    <h1>Test Email Tracking Pixel</h1>
+    <p>Jika tracking pixel bekerja, status email_logs akan berubah ke 'opened'.</p>
+    
+    <div style="border: 2px solid #ccc; padding: 20px; margin: 20px 0; background: #f9f9f9;">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Send campaign dan lihat Console log untuk tracking pixel URL</li>
+            <li>Copy URL tracking pixel (contoh: https://xtrognfmzyzqhsfvtgne.supabase.co/functions/v1/track-email?id=xxx&pid=yyy)</li>
+            <li>Paste URL di browser address bar dan tekan Enter</li>
+            <li>Kamu harus melihat 1x1 pixel image (atau blank page)</li>
+            <li>Cek Supabase SQL: <code>SELECT * FROM email_logs WHERE id = 'xxx'</code></li>
+            <li>Kolom <code>opened_at</code> harusnya terisi dengan timestamp</li>
+        </ol>
+    </div>
+
+    <div style="border: 2px solid #4CAF50; padding: 20px; margin: 20px 0;">
+        <h3>Test Tracking Pixel Langsung:</h3>
+        <p>Ganti <code>YOUR_EMAIL_LOG_ID</code> dan <code>YOUR_PARTICIPANT_ID</code> dengan ID real dari database:</p>
+        <pre style="background: #eee; padding: 10px; overflow-x: auto;">
+&lt;img src="https://xtrognfmzyzqhsfvtgne.supabase.co/functions/v1/track-email?id=YOUR_EMAIL_LOG_ID&pid=YOUR_PARTICIPANT_ID" width="1" height="1" alt="" /&gt;
+        </pre>
+        
+        <p><strong>Test pixel di bawah ini (ganti ID dulu!):</strong></p>
+        <img src="https://xtrognfmzyzqhsfvtgne.supabase.co/functions/v1/track-email?id=test&pid=test" width="1" height="1" alt="" />
+        <p style="color: green;">✅ Jika pixel loaded (check Network tab), Edge Function bekerja!</p>
+    </div>
+
+    <div style="border: 2px solid #ff9800; padding: 20px; margin: 20px 0;">
+        <h3>Debugging Checklist:</h3>
+        <ul>
+            <li>✅ Edge Function <code>track-email</code> sudah di-deploy?</li>
+            <li>✅ Email HTML include tracking pixel di bagian bawah?</li>
+            <li>✅ Gmail tidak block external images? (Check "Display images" di email)</li>
+            <li>✅ Browser Console tidak ada CORS error?</li>
+        </ul>
+    </div>
+
+    <script>
+        console.log('=== Email Tracking Test Page ===');
+        console.log('Tracking pixel URL format:', 'https://[PROJECT].supabase.co/functions/v1/track-email?id=[EMAIL_LOG_ID]&pid=[PARTICIPANT_ID]');
+        
+        // Listen for image load
+        document.querySelector('img').addEventListener('load', function() {
+            console.log('✅ Tracking pixel loaded successfully!');
+        });
+        
+        document.querySelector('img').addEventListener('error', function(e) {
+            console.error('❌ Tracking pixel failed to load:', e);
+        });
+    </script>
+</body>
+</html>

@@ -20,7 +20,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { AlertCircle, CheckCircle2, Calendar, MapPin, Loader2 } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
-import type { Event, BrandingSettings } from '../utils/localDBStub';
+import type { Event, BrandingSettings, ColumnVisibility } from '../utils/localDBStub';
+import { createParticipant } from '../utils/supabaseDataLayer';
 
 interface PublicRegistrationFormProps {
   eventId: string;
@@ -29,6 +30,13 @@ interface PublicRegistrationFormProps {
 export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps) {
   const [event, setEvent] = useState<Event | null>(null);
   const [branding, setBranding] = useState<BrandingSettings | null>(null);
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>({
+    phone: true,
+    company: true,
+    position: true,
+    attendance: true,
+    registered: true
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,8 +97,21 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
       
       setBranding(brandingSettings);
       
+      // Load column visibility settings
+      const visibility: ColumnVisibility = eventData.columnVisibility || {
+        phone: true,
+        company: true,
+        position: true,
+        attendance: true,
+        registered: true
+      };
+      setColumnVisibility(visibility);
+      
       console.log('[REGISTRATION] Loaded event:', loadedEvent.name);
       console.log('[REGISTRATION] Branding settings:', brandingSettings);
+      console.log('[REGISTRATION] Email auto-send enabled?', brandingSettings.autoSendConfirmation);
+      console.log('[REGISTRATION] Template ID:', brandingSettings.confirmationTemplateId);
+      console.log('[REGISTRATION] Column visibility:', visibility);
       
       setIsLoading(false);
     } catch (err) {
@@ -171,32 +192,183 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     setIsSubmitting(true);
     
     try {
-      // Create participant record with UUID
-      const participantId = `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('[REGISTRATION] 🔵 Submitting form data:', {
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone,
+        company: formData.company,
+        position: formData.position,
+        customData: formData.customData,
+        customDataKeys: Object.keys(formData.customData),
+        customDataValues: Object.values(formData.customData)
+      });
       
-      const participant: any = {
-        id: participantId,
+      // Create participant using the data layer function
+      // This ensures proper field mapping to database schema
+      const participant = await createParticipant({
         eventId: eventId,
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
         company: formData.company,
         position: formData.position,
-        registeredAt: new Date().toISOString(),
-        attendance: [],
         customData: formData.customData
-      };
+      });
       
-      // Save participant to Supabase
-      const { error } = await supabase
-        .from('participants')
-        .insert([participant]);
+      console.log('[REGISTRATION] ✅ Participant created:', participant);
+      console.log('[REGISTRATION] 🔍 Participant customData from response:', participant.customData);
       
-      if (error) {
-        throw new Error(`Failed to register: ${error.message}`);
+      // Send auto confirmation email if enabled
+      console.log('[REGISTRATION] Email settings check:', {
+        autoSendEnabled: branding?.autoSendConfirmation,
+        templateId: branding?.confirmationTemplateId,
+        hasTemplate: !!branding?.confirmationTemplateId
+      });
+      
+      if (branding?.autoSendConfirmation && branding?.confirmationTemplateId) {
+        console.log('[REGISTRATION] Attempting to send confirmation email to:', formData.email);
+        
+        try {
+          // Fetch email template from database
+          console.log('[REGISTRATION] 📧 Fetching template:', branding.confirmationTemplateId);
+          
+          const { data: template, error: templateError } = await supabase
+            .from('email_templates')
+            .select('*')
+            .eq('id', branding.confirmationTemplateId)
+            .single();
+          
+          if (templateError || !template) {
+            console.error('[REGISTRATION] ❌ Failed to fetch template:', templateError);
+            throw new Error(`Email template not found: ${branding.confirmationTemplateId}`);
+          }
+          
+          console.log('[REGISTRATION] ✅ Template loaded:', template.name);
+          
+          // Personalize template with participant data
+          const personalizedSubject = template.subject
+            .replace(/\{\{name\}\}/g, formData.name)
+            .replace(/\{\{email\}\}/g, formData.email);
+          
+          let personalizedBody = template.body
+            .replace(/\{\{name\}\}/g, formData.name)
+            .replace(/\{\{email\}\}/g, formData.email)
+            .replace(/\{\{participant_id\}\}/g, participant.id);
+          
+          // Prepare attachments array - include template attachments + QR code if enabled
+          let emailAttachments: string[] = template.attachments || [];
+          
+          console.log('[REGISTRATION] Template attachments:', emailAttachments);
+          console.log('[REGISTRATION] Include QR code?', template.include_qr_code);
+          console.log('[REGISTRATION] Participant QR URL:', participant.qr_code_url);
+          
+          // Add QR code if enabled in template and available
+          if (template.include_qr_code && participant.qr_code_url) {
+            console.log('[REGISTRATION] Adding QR code to attachments');
+            emailAttachments = [
+              ...emailAttachments,
+              participant.qr_code_url
+            ];
+          } else if (template.include_qr_code && !participant.qr_code_url) {
+            console.warn('[REGISTRATION] ⚠️ QR code requested but not available for participant');
+          }
+
+          // Create email log first to get tracking ID
+          const { data: emailLogData, error: logCreateError } = await supabase
+            .from('participant_emails')
+            .insert({
+              participant_id: participant.id,
+              template_id: template.id,
+              template_name: template.name,
+              subject: personalizedSubject,
+              status: 'pending'
+            })
+            .select()
+            .single();
+
+          let emailLogId = emailLogData?.id;
+
+          // Add tracking pixel if email log created successfully
+          if (emailLogId) {
+            const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
+            // Method 1: Tracking pixel (may be blocked by Gmail)
+            const trackingPixel = `<img src="${supabaseUrl}/functions/v1/track-email?id=${emailLogId}&pid=${participant.id}" width="1" height="1" style="display:none;" alt="" />`;
+            
+            // Method 2: Add tracking to any existing links (more reliable)
+            let bodyWithTracking = personalizedBody;
+            
+            // Find all clickable links and add tracking parameter
+            const linkRegex = /(https?:\/\/[^\s<>"]+)/gi;
+            bodyWithTracking = bodyWithTracking.replace(linkRegex, (match) => {
+              // Add tracking parameter to links
+              const separator = match.includes('?') ? '&' : '?';
+              return `${match}${separator}_track=${emailLogId}`;
+            });
+            
+            // Add tracking pixel at the end
+            bodyWithTracking = bodyWithTracking + trackingPixel;
+            
+            personalizedBody = bodyWithTracking;
+            console.log('[REGISTRATION] ✅ Tracking pixel added to email');
+          }
+          
+          const emailPayload = {
+            to: formData.email,
+            subject: personalizedSubject,
+            html: personalizedBody,
+            participantId: participant.id,
+            templateId: template.id,
+            attachments: emailAttachments
+          };
+          
+          console.log('[REGISTRATION] 📧 Email payload:', {
+            to: emailPayload.to,
+            subject: emailPayload.subject,
+            participantId: emailPayload.participantId,
+            templateId: emailPayload.templateId,
+            attachmentsCount: emailAttachments.length,
+            attachmentsList: emailAttachments
+          });
+          
+          const { data: emailData, error: emailError } = await supabase.functions.invoke('send-email', {
+            body: emailPayload
+          });
+
+          // Update email log status
+          if (emailLogId) {
+            const emailStatus = emailError ? 'failed' : 'sent';
+            await supabase
+              .from('participant_emails')
+              .update({
+                status: emailStatus,
+                error_message: emailError ? JSON.stringify(emailError) : null
+              })
+              .eq('id', emailLogId);
+            
+            console.log('[REGISTRATION] ✅ Email log updated to:', emailStatus);
+          }
+
+          if (emailError) {
+            console.error('[REGISTRATION] ❌ Email send error:', emailError);
+            console.error('[REGISTRATION] Error details:', JSON.stringify(emailError, null, 2));
+            // Don't fail registration if email fails
+          } else {
+            console.log('[REGISTRATION] ✅ Confirmation email sent successfully to:', formData.email);
+            console.log('[REGISTRATION] 📧 Email response:', emailData);
+          }
+        } catch (emailErr) {
+          console.error('[REGISTRATION] ❌ Email exception:', emailErr);
+          console.error('[REGISTRATION] Exception details:', JSON.stringify(emailErr, null, 2));
+          // Don't fail registration if email fails
+        }
+      } else {
+        console.log('[REGISTRATION] ⚠️ Email not sent - auto-send disabled or template not configured');
+        console.log('[REGISTRATION] Debug info:', {
+          autoSendConfirmation: branding?.autoSendConfirmation,
+          confirmationTemplateId: branding?.confirmationTemplateId,
+          brandingObject: branding
+        });
       }
-      
-      console.log('[REGISTRATION] Participant registered:', participant.id);
       
       // Show success modal
       setSuccess(true);
@@ -240,7 +412,10 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     );
   }
 
-  const sortedCustomFields = event?.customFields?.sort((a, b) => a.order - b.order) || [];
+  // Filter and sort custom fields - only show visible fields
+  const sortedCustomFields = event?.customFields
+    ?.filter(field => field.visible !== false) // Only include fields where visible is true or undefined
+    ?.sort((a, b) => a.order - b.order) || [];
 
   // Determine logo size class
   const getLogoSizeClass = () => {
@@ -279,12 +454,23 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     <div 
       className={`min-h-screen py-12 px-6 ${getFontFamilyClass()}`}
       style={{ 
-        backgroundColor: branding?.backgroundColor || '#f0f9ff'
+        backgroundColor: branding?.backgroundColor || '#f0f9ff',
+        color: branding?.fontColor || '#1F2937',
+        fontSize: 
+          branding?.fontSize === 'small' ? '0.875rem' :
+          branding?.fontSize === 'large' ? '1.125rem' : '1rem'
       }}
     >
-      <div className="max-w-2xl mx-auto">
+      <div 
+        className="mx-auto"
+        style={{
+          maxWidth: 
+            branding?.formWidth === 'narrow' ? '400px' :
+            branding?.formWidth === 'wide' ? '800px' : '600px'
+        }}
+      >
         {/* Event Header */}
-        <Card className="mb-6">
+        <Card className="mb-6 backdrop-blur-md bg-white/60 shadow-xl border border-white/20">
           <CardHeader className="text-center">
             {/* Logo */}
             {branding?.logoUrl && (
@@ -300,44 +486,143 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
             {/* Custom Header Text */}
             {branding?.customHeader && (
               <p 
-                className="text-lg mb-2"
+                className="text-lg mb-4 font-medium"
                 style={{ color: branding.primaryColor }}
               >
                 {branding.customHeader}
               </p>
             )}
             
-            <CardTitle className="text-3xl">{event?.name}</CardTitle>
-            <div className="text-muted-foreground text-base mt-2">
-              <div className="flex items-center justify-center gap-4 mt-2">
-                {event?.startDate && (
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-4 w-4" />
-                    <span>{new Date(event.startDate).toLocaleDateString()}</span>
+            <CardTitle className="text-4xl font-bold mb-6">{event?.name}</CardTitle>
+            
+            {/* Date and Location - Modern Style */}
+            {((branding?.showDate !== false && event?.startDate) || (branding?.showLocation !== false && event?.location)) && (
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-6 mb-6">
+                {branding?.showDate !== false && event?.startDate && (
+                  <div 
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full backdrop-blur-sm shadow-sm"
+                    style={{ 
+                      backgroundColor: branding?.primaryColor ? `${branding.primaryColor}15` : 'rgba(124, 58, 237, 0.1)',
+                      border: `1px solid ${branding?.primaryColor ? `${branding.primaryColor}30` : 'rgba(124, 58, 237, 0.2)'}`
+                    }}
+                  >
+                    <Calendar 
+                      className="h-4 w-4" 
+                      style={{ color: branding?.primaryColor || '#7C3AED' }}
+                    />
+                    <span 
+                      className="text-sm font-medium"
+                      style={{ color: branding?.primaryColor || '#7C3AED' }}
+                    >
+                      {new Date(event.startDate).toLocaleDateString('id-ID', { 
+                        day: '2-digit', 
+                        month: 'short', 
+                        year: 'numeric' 
+                      })}
+                    </span>
                   </div>
                 )}
-                {event?.location && (
-                  <div className="flex items-center gap-1">
-                    <MapPin className="h-4 w-4" />
-                    <span>{event.location}</span>
+                {branding?.showLocation !== false && event?.location && (
+                  <div 
+                    className="inline-flex items-center gap-3 px-6 py-3 rounded-full backdrop-blur-md shadow-lg hover:shadow-xl transition-shadow duration-300"
+                    style={{ 
+                      backgroundColor: branding?.primaryColor ? `${branding.primaryColor}12` : 'rgba(124, 58, 237, 0.08)',
+                      border: `2px solid ${branding?.primaryColor ? `${branding.primaryColor}40` : 'rgba(124, 58, 237, 0.3)'}`
+                    }}
+                  >
+                    <div 
+                      className="p-2 rounded-full"
+                      style={{ 
+                        backgroundColor: branding?.primaryColor ? `${branding.primaryColor}20` : 'rgba(124, 58, 237, 0.15)'
+                      }}
+                    >
+                      <MapPin 
+                        className="h-5 w-5" 
+                        style={{ 
+                          color: branding?.primaryColor || '#7C3AED',
+                          strokeWidth: 2.5
+                        }}
+                      />
+                    </div>
+                    <span 
+                      className="text-base font-semibold tracking-wide"
+                      style={{ 
+                        color: branding?.primaryColor || '#7C3AED',
+                        letterSpacing: '0.02em'
+                      }}
+                    >
+                      {event.location}
+                    </span>
                   </div>
                 )}
               </div>
-            </div>
-            {event?.description && (
-              <p className="text-sm text-muted-foreground mt-2">{event.description}</p>
+            )}
+            
+            {branding?.showDescription !== false && event?.description && (
+              <p className="text-sm text-muted-foreground mt-2 mb-4 max-w-2xl mx-auto">{event.description}</p>
             )}
           </CardHeader>
         </Card>
 
         {/* Registration Form */}
-        <Card>
+        <Card 
+          className="backdrop-blur-md bg-white/60 shadow-xl border border-white/20"
+          style={{
+            borderRadius: 
+              branding?.borderRadius === 'none' ? '0' :
+              branding?.borderRadius === 'small' ? '4px' :
+              branding?.borderRadius === 'large' ? '12px' : '8px'
+          }}
+        >
           <CardHeader>
             <CardTitle>Register Now</CardTitle>
             <CardDescription>Please fill out the form below to register</CardDescription>
           </CardHeader>
           <CardContent>
             <style>{`
+              /* Microsoft Forms-style transparent inputs */
+              .registration-form input,
+              .registration-form textarea,
+              .registration-form select {
+                background-color: rgba(255, 255, 255, 0.1) !important;
+                backdrop-filter: blur(10px);
+                border: none !important;
+                border-bottom: 2px solid rgba(0, 0, 0, 0.2) !important;
+                border-radius: 4px 4px 0 0 !important;
+                transition: all 0.3s ease;
+                padding: 12px 8px !important;
+              }
+              
+              .registration-form input:hover,
+              .registration-form textarea:hover,
+              .registration-form select:hover {
+                background-color: rgba(255, 255, 255, 0.15) !important;
+                border-bottom-color: rgba(0, 0, 0, 0.3) !important;
+              }
+              
+              .registration-form input:focus,
+              .registration-form textarea:focus,
+              .registration-form select:focus {
+                background-color: rgba(255, 255, 255, 0.2) !important;
+                border-bottom-color: ${branding?.primaryColor || '#7C3AED'} !important;
+                border-bottom-width: 3px !important;
+                outline: none !important;
+                box-shadow: none !important;
+                ring: 0 !important;
+              }
+              
+              .registration-form input::placeholder,
+              .registration-form textarea::placeholder {
+                color: rgba(0, 0, 0, 0.4);
+              }
+              
+              .registration-form label {
+                font-weight: 500;
+                font-size: 0.875rem;
+                color: ${branding?.fontColor || '#1F2937'};
+                margin-bottom: 4px;
+              }
+              
               .registration-form label:has(+ input[required])::after,
               .registration-form label:has(+ textarea[required])::after,
               .registration-form label:has(+ select[required])::after {
@@ -373,36 +658,45 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="phone">Phone Number</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
-                    placeholder="+1 (555) 000-0000"
-                  />
-                </div>
+                {/* Phone Number - Conditionally rendered */}
+                {columnVisibility.phone && (
+                  <div>
+                    <Label htmlFor="phone">Phone Number</Label>
+                    <Input
+                      id="phone"
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      placeholder="+1 (555) 000-0000"
+                    />
+                  </div>
+                )}
 
-                <div>
-                  <Label htmlFor="company">Company</Label>
-                  <Input
-                    id="company"
-                    value={formData.company}
-                    onChange={(e) => handleInputChange('company', e.target.value)}
-                    placeholder="Your company name"
-                  />
-                </div>
+                {/* Company - Conditionally rendered */}
+                {columnVisibility.company && (
+                  <div>
+                    <Label htmlFor="company">Company</Label>
+                    <Input
+                      id="company"
+                      value={formData.company}
+                      onChange={(e) => handleInputChange('company', e.target.value)}
+                      placeholder="Your company name"
+                    />
+                  </div>
+                )}
 
-                <div>
-                  <Label htmlFor="position">Position/Title</Label>
-                  <Input
-                    id="position"
-                    value={formData.position}
-                    onChange={(e) => handleInputChange('position', e.target.value)}
-                    placeholder="Your job title"
-                  />
-                </div>
+                {/* Position - Conditionally rendered */}
+                {columnVisibility.position && (
+                  <div>
+                    <Label htmlFor="position">Position/Title</Label>
+                    <Input
+                      id="position"
+                      value={formData.position}
+                      onChange={(e) => handleInputChange('position', e.target.value)}
+                      placeholder="Your job title"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Custom Fields */}
@@ -461,13 +755,17 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
               {/* Submit Button */}
               <Button
                 type="submit"
-                className="w-full"
+                className="w-full text-white"
                 size="lg"
                 disabled={isSubmitting}
-                style={branding?.primaryColor ? {
-                  backgroundColor: branding.primaryColor,
-                  borderColor: branding.primaryColor
-                } : undefined}
+                style={{
+                  backgroundColor: branding?.buttonColor || branding?.primaryColor,
+                  borderColor: branding?.buttonColor || branding?.primaryColor,
+                  borderRadius: 
+                    branding?.borderRadius === 'none' ? '0' :
+                    branding?.borderRadius === 'small' ? '4px' :
+                    branding?.borderRadius === 'large' ? '12px' : '8px'
+                }}
               >
                 {isSubmitting ? (
                   <>
@@ -475,7 +773,7 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                     Submitting...
                   </>
                 ) : (
-                  'Complete Registration'
+                  branding?.buttonText || 'Complete Registration'
                 )}
               </Button>
             </form>
@@ -483,8 +781,11 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
         </Card>
 
         {/* Footer */}
-        <p className="text-center text-sm text-muted-foreground mt-6">
-          By registering, you agree to receive event-related communications.
+        <p 
+          className="text-center text-sm mt-6"
+          style={{ color: branding?.footerColor || '#6B7280' }}
+        >
+          {branding?.footerText || 'By registering, you agree to receive event-related communications.'}
         </p>
       </div>
 
@@ -520,10 +821,21 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
               Registration Successful!
             </DialogTitle>
             <DialogDescription className="text-center text-base pt-2">
-              Thank you for registering for <strong>{event?.name}</strong>.
-              <br />
-              <br />
-              You will receive an email shortly containing your QR code and further event details.
+              {branding?.successMessage ? (
+                <>
+                  {branding.successMessage}
+                  <br /><br />
+                  <span className="text-sm text-muted-foreground">
+                    Event: <strong>{event?.name}</strong>
+                  </span>
+                </>
+              ) : (
+                <>
+                  Thank you for registering for <strong>{event?.name}</strong>.
+                  <br /><br />
+                  You will receive an email shortly containing your QR code and further event details.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="sm:justify-center pt-4">

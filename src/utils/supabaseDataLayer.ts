@@ -17,6 +17,7 @@
  */
 
 import { supabase } from './supabase/client';
+import QRCode from 'qrcode';
 
 export interface CustomField {
   id: string;
@@ -34,6 +35,7 @@ export interface ColumnVisibility {
   position: boolean;
   attendance: boolean;
   registered: boolean;
+  emailStatus: boolean;
 }
 
 export interface BrandingSettings {
@@ -44,6 +46,9 @@ export interface BrandingSettings {
   backgroundColor: string;
   fontFamily: 'sans-serif' | 'serif' | 'monospace';
   customHeader?: string;
+  // Email confirmation settings
+  autoSendConfirmation?: boolean;
+  confirmationTemplateId?: string;
 }
 
 export interface Event {
@@ -70,6 +75,7 @@ export interface Participant {
   registeredAt: string;
   attendance: Array<{ agendaItem: string; timestamp: string }>;
   customData?: Record<string, any>;
+  qr_code_url?: string; // URL to QR code image in Supabase Storage
 }
 
 export interface AgendaItem {
@@ -271,20 +277,115 @@ export async function getParticipantById(id: string, eventId: string): Promise<P
 }
 
 export async function createParticipant(participant: Omit<Participant, 'id' | 'registeredAt' | 'attendance'>): Promise<Participant> {
+  const participantId = generateParticipantId();
+  
   const newParticipant: Participant = {
-    id: generateParticipantId(),
+    id: participantId,
     registeredAt: new Date().toISOString(),
     attendance: [],
     ...participant,
   };
   
+  console.log('[createParticipant] 🔵 Participant object to insert:', newParticipant);
+  console.log('[createParticipant] 🔍 customData being inserted:', newParticipant.customData);
+  
+  try {
+    // Generate QR code as PNG data URL
+    console.log('[createParticipant] 🔵 Starting QR generation for:', participantId);
+    
+    const qrDataUrl = await QRCode.toDataURL(participantId, {
+      width: 600,
+      margin: 2,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
+    
+    console.log('[createParticipant] ✅ QR code generated, length:', qrDataUrl.length);
+    
+    // Convert data URL to blob
+    const base64Data = qrDataUrl.split(',')[1];
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    const qrBlob = new Blob([bytes], { type: 'image/png' });
+    const fileName = `${participantId}.png`;
+    
+    console.log('[createParticipant] 🔵 Uploading to storage bucket: participant-qr-codes, file:', fileName, 'size:', qrBlob.size, 'bytes');
+    
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('participant-qr-codes')
+      .upload(fileName, qrBlob, {
+        contentType: 'image/png',
+        upsert: true
+      });
+    
+    if (uploadError) {
+      console.error('[createParticipant] ❌ Upload failed:', uploadError);
+      console.log('[createParticipant] 💡 Saving as data URL instead...');
+      
+      // Fallback: save as data URL in database
+      newParticipant.qr_code_url = qrDataUrl;
+    } else {
+      console.log('[createParticipant] ✅ Upload successful, data:', uploadData);
+      
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('participant-qr-codes')
+        .getPublicUrl(fileName);
+      
+      newParticipant.qr_code_url = urlData.publicUrl;
+      console.log('[createParticipant] ✅ QR code uploaded successfully:', urlData.publicUrl);
+    }
+  } catch (qrError: any) {
+    console.error('[createParticipant] ❌ QR generation error:', qrError);
+    // Continue without QR code
+  }
+  
+  console.log('[createParticipant] 🔵 Inserting participant to database...');
+  console.log('[createParticipant] 📊 Data being sent to database:', {
+    id: newParticipant.id,
+    eventId: newParticipant.eventId,
+    name: newParticipant.name,
+    email: newParticipant.email,
+    customData: newParticipant.customData
+  });
+  
+  // Map to database column names (quoted identifiers in schema)
+  const dbRecord = {
+    id: newParticipant.id,
+    eventId: newParticipant.eventId,
+    name: newParticipant.name,
+    email: newParticipant.email,
+    phone: newParticipant.phone,
+    company: newParticipant.company,
+    position: newParticipant.position,
+    registeredAt: newParticipant.registeredAt,
+    attendance: newParticipant.attendance,
+    customData: newParticipant.customData,
+    qr_code_url: newParticipant.qr_code_url
+  };
+  
+  console.log('[createParticipant] 🔵 Database record to insert:', dbRecord);
+  
   const { data, error } = await supabase
     .from('participants')
-    .insert([newParticipant])
+    .insert([dbRecord])
     .select()
     .single();
   
-  if (error) throw error;
+  if (error) {
+    console.error('[createParticipant] ❌ Database insert error:', error);
+    throw error;
+  }
+  
+  console.log('[createParticipant] ✅ Participant created in database:', data);
+  console.log('[createParticipant] 🔍 Returned customData:', data.customData);
   return data;
 }
 

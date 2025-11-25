@@ -93,9 +93,16 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
     try {
       setUploadingFile(true);
 
-      // Create storage bucket path
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${eventId}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      // Create storage bucket path with original filename
+      // Sanitize filename to remove special characters
+      const sanitizedName = file.name.replace(/[^a-zA-Z0-9.-_]/g, '_');
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).substring(7);
+      const fileName = `${eventId}/${timestamp}_${random}_${sanitizedName}`;
+      
+      console.log('[Upload] Original filename:', file.name);
+      console.log('[Upload] Sanitized filename:', sanitizedName);
+      console.log('[Upload] Storage path:', fileName);
       
       // Upload to Supabase Storage
       const { error } = await supabase.storage

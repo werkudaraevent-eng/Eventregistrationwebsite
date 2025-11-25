@@ -98,13 +98,31 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         .update({ status: 'sending', sent_at: new Date().toISOString() })
         .eq('id', campaign.id);
 
-      // Get target participants
-      const { data: participants } = await supabase.rpc('get_campaign_participants', {
-        p_event_id: eventId,
-        p_target_type: campaign.target_type,
-        p_target_filter: campaign.target_filter || {},
-        p_target_participant_ids: campaign.target_participant_ids || []
-      });
+      // Get target participants based on campaign targeting
+      let participantsQuery = supabase
+        .from('participants')
+        .select('*')
+        .eq('eventId', eventId);
+
+      // Apply target filtering
+      if ((campaign.target_type === 'selected' || campaign.target_type === 'manual') && campaign.target_participant_ids?.length) {
+        participantsQuery = participantsQuery.in('id', campaign.target_participant_ids);
+      } else if (campaign.target_type === 'filtered' && campaign.target_filter) {
+        // Apply custom filters if needed (simplified version)
+        const filter = campaign.target_filter as any;
+        if (filter.status) {
+          participantsQuery = participantsQuery.eq('status', filter.status);
+        }
+      }
+      // 'all' type = no additional filter
+
+      const { data: participants, error: participantsError } = await participantsQuery;
+
+      if (participantsError) {
+        console.error('Error fetching participants:', participantsError);
+        alert('Failed to fetch participants');
+        return;
+      }
 
       if (!participants || participants.length === 0) {
         alert('No participants found for this campaign');
@@ -138,16 +156,92 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         try {
           // Replace placeholders
           const personalizedSubject = replacePlaceholders(template.subject, participant, eventData);
-          const personalizedBody = replacePlaceholders(template.body, participant, eventData);
+          let personalizedBody = replacePlaceholders(template.body, participant, eventData);
 
-          // Send via edge function
+          // Create email log first to get tracking ID
+          const { data: emailLog, error: logCreateError } = await supabase
+            .from('participant_emails')
+            .insert({
+              campaign_id: campaign.id,
+              participant_id: participant.id,
+              template_id: template.id,
+              template_name: template.name,
+              subject: personalizedSubject,
+              status: 'pending'
+            })
+            .select()
+            .single();
+
+          if (logCreateError || !emailLog) {
+            console.error('Error creating email log:', logCreateError);
+          } else {
+            // Inject tracking pixel with email log ID and participant ID
+            // Use Supabase Edge Function URL for tracking
+            const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL;
+            
+            // Method 1: Tracking pixel (may be blocked by Gmail)
+            const trackingPixel = `<img src="${supabaseUrl}/functions/v1/track-email?id=${emailLog.id}&pid=${participant.id}" width="1" height="1" style="display:none;" alt="" />`;
+            
+            // Method 2: Add tracking to any existing links (more reliable)
+            // Wrap any http/https links with tracking
+            let bodyWithTracking = personalizedBody;
+            
+            // Find first clickable link and add tracking parameter
+            const linkRegex = /(https?:\/\/[^\s<>"]+)/gi;
+            bodyWithTracking = bodyWithTracking.replace(linkRegex, (match) => {
+              // Add tracking parameter to first link only
+              const separator = match.includes('?') ? '&' : '?';
+              return `${match}${separator}_track=${emailLog.id}`;
+            });
+            
+            // Add tracking pixel at the end
+            bodyWithTracking = bodyWithTracking + trackingPixel;
+            
+            console.log('[BlastCampaign] Tracking pixel URL:', `${supabaseUrl}/functions/v1/track-email?id=${emailLog.id}&pid=${participant.id}`);
+            console.log('[BlastCampaign] Email log ID:', emailLog.id);
+            
+            personalizedBody = bodyWithTracking;
+          }
+
+          // Prepare attachments array (URLs only)
+          let emailAttachments = template.attachments || [];
+
+          console.log('[BlastCampaign] 🔍 Checking QR code:', {
+            templateIncludeQR: template.include_qr_code,
+            participantQRUrl: participant.qr_code_url,
+            participantId: participant.id,
+            participantEmail: participant.email
+          });
+
+          // Add participant QR code from database if template requires it
+          if (template.include_qr_code && participant.qr_code_url) {
+            console.log('[BlastCampaign] ✅ Adding QR code from database:', participant.qr_code_url);
+            emailAttachments = [
+              ...emailAttachments,
+              participant.qr_code_url
+            ];
+          } else if (template.include_qr_code && !participant.qr_code_url) {
+            console.warn('[BlastCampaign] ⚠️ QR code requested but not found in participant data for:', participant.id);
+          }
+
+          console.log('[BlastCampaign] 📧 Sending email with params:', {
+            to: participant.email,
+            participantId: participant.id,
+            templateId: template.id,
+            attachmentsArray: emailAttachments,
+            attachmentsCount: emailAttachments?.length || 0,
+            includeQR: template.include_qr_code
+          });
+
+          // Send via edge function with attachments
           const { error: sendError } = await supabase.functions.invoke('send-email', {
             body: {
               to: participant.email,
               subject: personalizedSubject,
               html: personalizedBody,
               participantId: participant.id,
-              templateId: template.id
+              templateId: template.id,
+              attachments: emailAttachments
             }
           });
 
@@ -155,47 +249,49 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
             console.error(`Failed to send to ${participant.email}:`, sendError);
             failed++;
             
-            // Log failed email
-            await supabase.from('email_logs').insert({
-              campaign_id: campaign.id,
-              participant_id: participant.id,
-              template_id: template.id,
-              template_name: template.name,
-              subject: personalizedSubject,
-              status: 'failed',
-              error_message: sendError.message
-            });
+            // Update email log to failed (if it was created)
+            if (emailLog) {
+              await supabase.from('participant_emails')
+                .update({
+                  status: 'failed',
+                  error_message: sendError.message
+                })
+                .eq('id', emailLog.id);
+            } else {
+              // Create new log if previous insert failed
+              await supabase.from('participant_emails').insert({
+                campaign_id: campaign.id,
+                participant_id: participant.id,
+                template_id: template.id,
+                template_name: template.name,
+                subject: personalizedSubject,
+                status: 'failed',
+                error_message: sendError.message
+              });
+            }
           } else {
             console.log(`✅ Sent to ${participant.email}`);
             sent++;
             
-            // Log sent email
-            await supabase.from('email_logs').insert({
-              campaign_id: campaign.id,
-              participant_id: participant.id,
-              template_id: template.id,
-              template_name: template.name,
-              subject: personalizedSubject,
-              status: 'sent'
-            });
+            // Update email log to sent (if it was created)
+            if (emailLog) {
+              await supabase.from('participant_emails')
+                .update({ status: 'sent' })
+                .eq('id', emailLog.id);
+            } else {
+              // Create new log if previous insert failed
+              await supabase.from('participant_emails').insert({
+                campaign_id: campaign.id,
+                participant_id: participant.id,
+                template_id: template.id,
+                template_name: template.name,
+                subject: personalizedSubject,
+                status: 'sent'
+              });
+            }
 
-            // Update participant email status
-            await supabase.rpc('update_participant_email_status', {
-              p_participant_id: participant.id,
-              p_template_id: template.id,
-              p_template_name: template.name,
-              p_subject: personalizedSubject,
-              p_status: 'sent',
-              p_error_message: null
-            });
+            // No need for RPC, already updated above
           }
-
-          // Update campaign progress
-          await supabase.rpc('update_campaign_progress', {
-            p_campaign_id: campaign.id,
-            p_sent_increment: sent > 0 ? 1 : 0,
-            p_failed_increment: failed > 0 ? 1 : 0
-          });
 
           // Rate limiting
           await new Promise(resolve => setTimeout(resolve, 100));
@@ -205,11 +301,30 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         }
       }
 
+      // Update campaign status to 'completed'
+      await supabase
+        .from('campaigns')
+        .update({ 
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          sent_count: sent,
+          failed_count: failed
+        })
+        .eq('id', campaign.id);
+
       alert(`✅ Campaign complete!\n\nSent: ${sent}\nFailed: ${failed}\nTotal: ${participants.length}`);
       fetchCampaigns();
     } catch (error) {
       console.error('Error sending campaign:', error);
       alert('Error sending campaign: ' + (error as Error).message);
+      
+      // Update campaign status to 'failed' if error
+      if (campaign?.id) {
+        await supabase
+          .from('campaigns')
+          .update({ status: 'failed' })
+          .eq('id', campaign.id);
+      }
     } finally {
       setSendingCampaign(null);
     }
@@ -334,7 +449,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         console.error(`Failed to send to ${participant.email}:`, sendError);
         
         // Log failed email
-        await supabase.from('email_logs').insert({
+        await supabase.from('participant_emails').insert({
           campaign_id: campaign.id,
           participant_id: participant.id,
           template_id: template.id,
@@ -349,7 +464,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         console.log(`✅ Sent to ${participant.email}`);
         
         // Log sent email
-        await supabase.from('email_logs').insert({
+        await supabase.from('participant_emails').insert({
           campaign_id: campaign.id,
           participant_id: participant.id,
           template_id: template.id,
@@ -383,32 +498,71 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
   const handleViewParticipants = async (campaign: Campaign) => {
     try {
       setSelectedCampaign(campaign);
-      const { data, error } = await supabase.rpc('get_campaign_participants', {
-        p_event_id: eventId,
-        p_target_type: campaign.target_type,
-        p_target_filter: campaign.target_filter || {},
-        p_target_participant_ids: campaign.target_participant_ids || []
+      
+      console.log('[ViewParticipants] Campaign details:', {
+        name: campaign.name,
+        target_type: campaign.target_type,
+        target_participant_ids: campaign.target_participant_ids,
+        target_filter: campaign.target_filter
       });
+      
+      // Get target participants based on campaign targeting
+      let participantsQuery = supabase
+        .from('participants')
+        .select('*')
+        .eq('eventId', eventId);
 
+      // Apply target filtering
+      if ((campaign.target_type === 'selected' || campaign.target_type === 'manual') && campaign.target_participant_ids?.length) {
+        console.log('[ViewParticipants] Filtering by selected IDs:', campaign.target_participant_ids);
+        participantsQuery = participantsQuery.in('id', campaign.target_participant_ids);
+      } else if (campaign.target_type === 'filtered' && campaign.target_filter) {
+        // Apply custom filters if needed
+        const filter = campaign.target_filter as any;
+        console.log('[ViewParticipants] Applying filter:', filter);
+        if (filter.status) {
+          participantsQuery = participantsQuery.eq('status', filter.status);
+        }
+      } else {
+        console.log('[ViewParticipants] No filter applied - showing all participants');
+      }
+      
+      const { data, error } = await participantsQuery;
+
+      console.log('[ViewParticipants] Participants fetched:', data?.length);
+      
       if (error) throw error;
       
-      // Get email tracking status for each participant
+      // Get email tracking status for each participant - get latest status
       const participantIds = (data || []).map((p: any) => p.id);
       const { data: trackingData } = await supabase
-        .from('email_logs')
-        .select('participant_id, status')
+        .from('participant_emails')
+        .select('participant_id, status, opened_at, sent_at')
         .eq('campaign_id', campaign.id)
-        .in('participant_id', participantIds);
+        .in('participant_id', participantIds)
+        .order('sent_at', { ascending: false });
 
-      // Map tracking status to participants
-      const trackingMap = new Map(
-        (trackingData || []).map((t: any) => [t.participant_id, t.status])
-      );
+      console.log('[ViewParticipants] Tracking data:', trackingData);
+
+      // Map tracking status to participants - prioritize 'opened' status
+      const trackingMap = new Map();
+      (trackingData || []).forEach((t: any) => {
+        const currentStatus = trackingMap.get(t.participant_id);
+        // Prioritize: opened > sent > failed > pending
+        if (!currentStatus || 
+            (t.status === 'opened' && currentStatus !== 'opened') ||
+            (t.status === 'sent' && currentStatus === 'pending') ||
+            (t.status === 'failed' && currentStatus === 'pending')) {
+          trackingMap.set(t.participant_id, t.status);
+        }
+      });
 
       const participantsWithStatus = (data || []).map((p: any) => ({
         ...p,
         email_status: trackingMap.get(p.id) || 'pending'
       }));
+
+      console.log('[ViewParticipants] Participants with status:', participantsWithStatus);
 
       setCampaignParticipants(participantsWithStatus);
       setShowParticipantsModal(true);
@@ -696,7 +850,12 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
                         <TableCell>{participant.company || '-'}</TableCell>
                         <TableCell>{participant.position || '-'}</TableCell>
                         <TableCell>
-                          {participant.email_status === 'sent' ? (
+                          {participant.email_status === 'opened' ? (
+                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                              <Eye className="h-3 w-3 mr-1" />
+                              Opened
+                            </Badge>
+                          ) : participant.email_status === 'sent' ? (
                             <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                               <CheckCircle className="h-3 w-3 mr-1" />
                               Sent
@@ -745,10 +904,27 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
                 </TableBody>
               </Table>
             </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowParticipantsModal(false)}>
-                Close
-              </Button>
+            <DialogFooter className="flex justify-between items-center">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <RefreshCw className="h-4 w-4" />
+                <span>Status auto-refreshes when email is opened</span>
+              </div>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    if (selectedCampaign) {
+                      handleViewParticipants(selectedCampaign);
+                    }
+                  }}
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Status
+                </Button>
+                <Button variant="outline" onClick={() => setShowParticipantsModal(false)}>
+                  Close
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
