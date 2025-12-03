@@ -91,6 +91,19 @@ export interface BrandingSettings {
   confirmationTemplateId?: string; // Email template ID for confirmation
 }
 
+export interface PaperSizeConfiguration {
+  sizeType: 'CR80' | 'A4' | 'A5' | 'A6' | 'A7' | 'Letter' | 'B1' | 'B2' | 'B3' | 'B4' | 'A1_ID' | 'A2_ID' | 'A3_ID' | 'Custom';
+  orientation: 'portrait' | 'landscape';
+  customWidth?: number;  // in mm
+  customHeight?: number; // in mm
+  margins: {
+    top: number;    // in mm
+    right: number;  // in mm
+    bottom: number; // in mm
+    left: number;   // in mm
+  };
+}
+
 export interface BadgeSettings {
   templateId?: string;
   showQR: boolean;
@@ -100,14 +113,52 @@ export interface BadgeSettings {
   textColor: string;
   accentColor: string;
   // Extended properties for BadgeDesigner
-  size?: 'CR80' | 'A6' | 'A7' | 'custom';
+  size?: 'CR80' | 'B1' | 'B2' | 'B3' | 'B4' | 'A1' | 'A2' | 'A3' | 'A6' | 'A7' | 'custom';
   customWidth?: number;
   customHeight?: number;
   backgroundImageUrl?: string;
   backgroundImageFit?: 'cover' | 'contain';
   logoUrl?: string;
   components?: any[];
+  // Print configuration
+  printConfiguration?: PaperSizeConfiguration;
 }
+
+// Paper size definitions (dimensions in mm)
+// All sizes stored in portrait orientation (width < height)
+// User can toggle orientation via OrientationSelector
+export const PAPER_SIZES = {
+  // Standard paper sizes for printing
+  A4: { width: 210, height: 297, label: 'A4 Paper' },
+  A5: { width: 148, height: 210, label: 'A5 Paper' },
+  A6: { width: 105, height: 148, label: 'A6 Paper' },
+  A7: { width: 74, height: 105, label: 'A7 Paper' },
+  Letter: { width: 215.9, height: 279.4, label: 'Letter (US)' },
+  // Badge/ID Card sizes
+  CR80: { width: 53.98, height: 85.6, label: 'CR80 (Credit Card)' },
+  // Indonesian ID Card Holder Sizes (B Series)
+  B1: { width: 55, height: 85, label: 'B1 (55×85mm)' },
+  B2: { width: 65, height: 105, label: 'B2 (65×105mm)' },
+  B3: { width: 80, height: 105, label: 'B3 (80×105mm)' },
+  B4: { width: 90, height: 130, label: 'B4 (90×130mm)' },
+  // Indonesian ID Card Holder Sizes (A Series)
+  A1_ID: { width: 55, height: 90, label: 'A1 ID (55×90mm)' },
+  A2_ID: { width: 65, height: 95, label: 'A2 ID (65×95mm)' },
+  A3_ID: { width: 80, height: 100, label: 'A3 ID (80×100mm)' },
+  Custom: { width: 100, height: 150, label: 'Custom Size' }
+} as const;
+
+// Default print configuration
+export const DEFAULT_PRINT_CONFIG: PaperSizeConfiguration = {
+  sizeType: 'A4',
+  orientation: 'portrait',
+  margins: {
+    top: 10,
+    right: 10,
+    bottom: 10,
+    left: 10
+  }
+};
 
 // Stub functions - TODO: Replace with Supabase queries
 const localDB = {

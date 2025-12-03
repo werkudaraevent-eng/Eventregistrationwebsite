@@ -615,3 +615,16 @@ export async function getCheckedInParticipants(eventId: string, agendaItemId: st
     p.attendance.some(a => a.agendaItem === agendaItemId)
   );
 }
+
+export async function removeCheckIn(participantId: string, eventId: string, agendaItemId: string): Promise<void> {
+  const participant = await getParticipantById(participantId, eventId);
+  
+  if (!participant) {
+    throw new Error('Participant not found');
+  }
+  
+  // Remove the check-in record for the specific agenda item
+  const updatedAttendance = participant.attendance.filter(a => a.agendaItem !== agendaItemId);
+  
+  await updateParticipant(participantId, eventId, { attendance: updatedAttendance });
+}

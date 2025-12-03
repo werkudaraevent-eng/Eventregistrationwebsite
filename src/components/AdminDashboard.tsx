@@ -8,8 +8,9 @@ import { EmailTemplates } from './EmailTemplates';
 import BlastCampaigns from './BlastCampaigns';
 import { EmailConfigurationV2 } from './EmailConfigurationV2';
 import { EmailHistory } from './EmailHistory';
-import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History } from 'lucide-react';
+import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History, CreditCard } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
+import { BadgeDesigner } from './BadgeDesigner';
 
 interface AdminDashboardProps {
   eventId: string;
@@ -36,7 +37,7 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
-    if (tabParam && ['participants', 'agenda', 'branding', 'emails', 'blast', 'email-config', 'email-history'].includes(tabParam)) {
+    if (tabParam && ['participants', 'agenda', 'branding', 'badge-design', 'emails', 'blast', 'email-config', 'email-history'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, []);
@@ -122,6 +123,10 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
               <Palette className="h-4 w-4" />
               <span className="hidden sm:inline">Branding</span>
             </TabsTrigger>
+            <TabsTrigger value="badge-design" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
+              <CreditCard className="h-4 w-4" />
+              <span className="hidden sm:inline">Badge Design</span>
+            </TabsTrigger>
             <TabsTrigger value="emails" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
               <Mail className="h-4 w-4" />
               <span className="hidden sm:inline">Templates</span>
@@ -150,6 +155,10 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
           <TabsContent value="branding">
             <BrandingSettings eventId={eventId} />
+          </TabsContent>
+
+          <TabsContent value="badge-design">
+            <BadgeDesigner eventId={eventId} />
           </TabsContent>
 
           <TabsContent value="emails">

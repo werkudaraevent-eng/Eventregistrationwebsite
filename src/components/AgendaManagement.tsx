@@ -54,6 +54,8 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: string; direction: 'asc' | 'desc' } | null>(null);
+  const [deleteCheckInConfirm, setDeleteCheckInConfirm] = useState<{ participantId: string; participantName: string; agendaItem: string } | null>(null);
+  const [isDeletingCheckIn, setIsDeletingCheckIn] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -154,6 +156,44 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
       setLastUpdated(new Date());
     } catch (err: any) {
       console.error('[SUPABASE] Error fetching participants:', err);
+    }
+  };
+
+  // Delete check-in record for a participant
+  const handleDeleteCheckIn = async () => {
+    if (!deleteCheckInConfirm) return;
+    
+    setIsDeletingCheckIn(true);
+    try {
+      const { participantId, agendaItem } = deleteCheckInConfirm;
+      
+      // Find the participant
+      const participant = participants.find(p => p.id === participantId);
+      if (!participant) {
+        throw new Error('Participant not found');
+      }
+      
+      // Remove the check-in record for the specific agenda item
+      const updatedAttendance = participant.attendance.filter(a => a.agendaItem !== agendaItem);
+      
+      // Update in Supabase
+      const { error } = await supabase
+        .from('participants')
+        .update({ attendance: updatedAttendance })
+        .eq('id', participantId);
+      
+      if (error) {
+        throw new Error(`Failed to delete check-in: ${error.message}`);
+      }
+      
+      // Refresh participants list
+      await fetchParticipants();
+      setDeleteCheckInConfirm(null);
+    } catch (err: any) {
+      console.error('[SUPABASE] Error deleting check-in:', err);
+      alert('Failed to delete check-in: ' + err.message);
+    } finally {
+      setIsDeletingCheckIn(false);
     }
   };
 
@@ -809,6 +849,12 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                             {getSortIcon('checkInTime')}
                           </div>
                         </th>
+                        <th 
+                          className="text-foreground h-10 px-4 text-center align-middle font-medium whitespace-nowrap" 
+                          style={{ minWidth: '80px' }}
+                        >
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="[&_tr:last-child]:border-0">
@@ -829,6 +875,19 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                                 minute: '2-digit'
                               })}
                             </td>
+                            <td className="h-10 px-4 align-middle text-center" style={{ minWidth: '80px' }}>
+                              <button
+                                onClick={() => setDeleteCheckInConfirm({
+                                  participantId: participant.id,
+                                  participantName: participant.name,
+                                  agendaItem: selectedAgendaForParticipants
+                                })}
+                                className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                                title="Delete check-in"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -844,6 +903,68 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                 ← Scroll to see all participants →
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Check-in Confirmation Dialog */}
+        <Dialog open={!!deleteCheckInConfirm} onOpenChange={(open) => !open && setDeleteCheckInConfirm(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-red-600">Delete Check-in Record</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete the check-in record for <strong>{deleteCheckInConfirm?.participantName}</strong>?
+                <br /><br />
+                This will remove their attendance from this session. They can check in again later.
+              </DialogDescription>
+            </DialogHeader>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
+              <button
+                onClick={() => setDeleteCheckInConfirm(null)}
+                disabled={isDeletingCheckIn}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db',
+                  backgroundColor: 'white',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteCheckIn}
+                disabled={isDeletingCheckIn}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: '#dc2626',
+                  color: 'white',
+                  cursor: isDeletingCheckIn ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  opacity: isDeletingCheckIn ? 0.7 : 1
+                }}
+              >
+                {isDeletingCheckIn ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Delete Check-in
+                  </>
+                )}
+              </button>
+            </div>
           </DialogContent>
         </Dialog>
       </CardContent>

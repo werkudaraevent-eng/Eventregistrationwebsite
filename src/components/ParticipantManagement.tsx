@@ -7,11 +7,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, Filter, X } from 'lucide-react';
+import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, Filter, X, Printer } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { ColumnManagement } from './ColumnManagement';
 import { supabase } from '../utils/supabase/client';
 import { createParticipant } from '../utils/supabaseDataLayer';
+import { DEFAULT_PRINT_CONFIG } from '../utils/localDBStub';
+import type { PaperSizeConfiguration } from '../utils/localDBStub';
+import { BadgePrintView } from './BadgePrintView';
+import { BadgeTemplateSelector, type BadgeTemplate, loadBadgeTemplates } from './BadgeTemplateSelector';
+import QRCodeLib from 'qrcode';
 
 interface Participant {
   id: string;
@@ -102,6 +107,17 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const [isBulkEmailDialogOpen, setIsBulkEmailDialogOpen] = useState(false);
   const [bulkEmailTemplateId, setBulkEmailTemplateId] = useState<string>('');
   const [isSendingBulkEmail, setIsSendingBulkEmail] = useState(false);
+  
+  // Print configuration state
+  const [printConfig, setPrintConfig] = useState<PaperSizeConfiguration>(DEFAULT_PRINT_CONFIG);
+  const [badgeDimensions, setBadgeDimensions] = useState({ width: 85.6, height: 53.98 }); // CR80 default
+  const [badgeTemplate, setBadgeTemplate] = useState<any>(null);
+  const [eventName, setEventName] = useState<string>('');
+  
+  // Badge template selection
+  const [availableTemplates, setAvailableTemplates] = useState<BadgeTemplate[]>([]);
+  const [selectedBadgeTemplate, setSelectedBadgeTemplate] = useState<BadgeTemplate | null>(null);
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -230,6 +246,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     fetchParticipants();
     loadColumnSettings();
     loadEmailTemplates();
+    loadPrintConfiguration();
   }, [eventId, accessToken]);
 
   useEffect(() => {
@@ -620,6 +637,274 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       }
     } catch (error) {
       console.error('Error loading email templates:', error);
+    }
+  };
+
+  // Load print configuration from badge template
+  const loadPrintConfiguration = async () => {
+    try {
+      // Load available badge templates
+      const templates = await loadBadgeTemplates(eventId);
+      setAvailableTemplates(templates);
+      
+      // Auto-select default template if available
+      const defaultTemplate = templates.find(t => t.is_default);
+      if (defaultTemplate) {
+        handleTemplateSelect(defaultTemplate);
+      }
+
+      const { data, error } = await supabase
+        .from('events')
+        .select('badge_template, name')
+        .eq('id', eventId)
+        .single();
+
+      if (error) {
+        console.error('Error loading print configuration:', error);
+        return;
+      }
+
+      if (data) {
+        // Set event name
+        setEventName(data.name || '');
+
+        // If no templates in new table, use legacy template from events table
+        if (templates.length === 0 && data.badge_template) {
+          const template = data.badge_template;
+          
+          // Store full badge template
+          setBadgeTemplate(template);
+          
+          // Load print configuration if exists
+          if (template.printConfiguration) {
+            setPrintConfig(template.printConfiguration);
+          }
+
+          // Load badge dimensions
+          if (template.size) {
+            const BADGE_SIZES: Record<string, { width: number; height: number }> = {
+              CR80: { width: 85.6, height: 53.98 },
+              A6: { width: 105, height: 148 },
+              A7: { width: 74, height: 105 },
+              custom: { width: template.customWidth || 100, height: template.customHeight || 150 }
+            };
+            
+            const size = BADGE_SIZES[template.size] || BADGE_SIZES.CR80;
+            setBadgeDimensions(size);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading print configuration:', error);
+    }
+  };
+
+  // Handle template selection
+  const handleTemplateSelect = (template: BadgeTemplate | null) => {
+    setSelectedBadgeTemplate(template);
+    
+    if (template) {
+      const data = template.template_data;
+      setBadgeTemplate(data);
+      
+      if (data.printConfiguration) {
+        setPrintConfig(data.printConfiguration);
+      }
+      
+      if (data.size) {
+        const BADGE_SIZES: Record<string, { width: number; height: number }> = {
+          CR80: { width: 85.6, height: 53.98 },
+          A6: { width: 105, height: 148 },
+          A7: { width: 74, height: 105 },
+          B1: { width: 55, height: 85 },
+          B2: { width: 65, height: 105 },
+          B3: { width: 80, height: 105 },
+          B4: { width: 90, height: 130 },
+          A1: { width: 55, height: 90 },
+          A2: { width: 65, height: 95 },
+          A3: { width: 80, height: 100 },
+          custom: { width: data.customWidth || 100, height: data.customHeight || 150 }
+        };
+        
+        const size = BADGE_SIZES[data.size] || BADGE_SIZES.CR80;
+        setBadgeDimensions(size);
+      }
+    }
+  };
+
+  // Handle print badges for selected participants
+  const handlePrintBadges = async () => {
+    if (selectedParticipantIds.size === 0) {
+      alert('Please select at least one participant to print badges');
+      return;
+    }
+
+    if (!badgeTemplate && !selectedBadgeTemplate) {
+      alert('Please select a badge template first');
+      return;
+    }
+
+    const template = badgeTemplate;
+    if (!template) {
+      alert('No badge template available');
+      return;
+    }
+
+    try {
+      // Get selected participants
+      const selectedParticipants = Array.from(selectedParticipantIds)
+        .map(id => participants.find(p => p.id === id))
+        .filter(Boolean) as Participant[];
+
+      if (selectedParticipants.length === 0) {
+        alert('No participants selected');
+        return;
+      }
+
+      // Open new window for printing
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        alert('Please allow pop-ups to print badges');
+        return;
+      }
+
+      // Generate QR codes for all participants
+      const qrCodes: Record<string, string> = {};
+      for (const participant of selectedParticipants) {
+        try {
+          const qrData = participant.qr_code_url || participant.id;
+          qrCodes[participant.id] = await QRCodeLib.toDataURL(qrData, {
+            width: 200,
+            margin: 1,
+            color: { dark: '#000000', light: '#ffffff' }
+          });
+        } catch (err) {
+          console.error('Error generating QR code:', err);
+        }
+      }
+
+      // Build badges HTML
+      let badgesHtml = '';
+      const components = template.components || [];
+
+      for (const participant of selectedParticipants) {
+        let componentsHtml = '';
+        
+        for (const comp of components) {
+          if (!comp.enabled) continue;
+
+          const style = `
+            position: absolute;
+            left: ${comp.x}%;
+            top: ${comp.y}%;
+            width: ${comp.width}%;
+            height: ${comp.height}%;
+            font-size: ${comp.fontSize || 16}px;
+            font-family: ${comp.fontFamily || 'sans-serif'};
+            font-weight: ${comp.fontWeight || 'normal'};
+            font-style: ${comp.fontStyle || 'normal'};
+            text-align: ${comp.textAlign || 'center'};
+            color: ${comp.color || '#000000'};
+            display: flex;
+            align-items: center;
+            justify-content: ${comp.textAlign === 'left' ? 'flex-start' : comp.textAlign === 'right' ? 'flex-end' : 'center'};
+            overflow: hidden;
+          `;
+
+          let content = '';
+          switch (comp.type) {
+            case 'field':
+              const fieldValue = comp.fieldName === 'name' ? participant.name
+                : comp.fieldName === 'email' ? participant.email
+                : comp.fieldName === 'phone' ? participant.phone
+                : comp.fieldName === 'company' ? participant.company
+                : comp.fieldName === 'position' ? participant.position
+                : (participant.customData?.[comp.fieldName || '']) || comp.label || '';
+              content = `<span>${fieldValue}</span>`;
+              break;
+            case 'qrcode':
+              content = qrCodes[participant.id] ? `<img src="${qrCodes[participant.id]}" style="width: 100%; height: 100%; object-fit: contain;" />` : '';
+              break;
+            case 'eventName':
+              content = `<span>${eventName}</span>`;
+              break;
+            case 'customText':
+              content = `<span>${comp.customText || comp.label || ''}</span>`;
+              break;
+            case 'logo':
+              if (template.logoUrl) {
+                content = `<img src="${template.logoUrl}" style="width: 100%; height: 100%; object-fit: contain;" />`;
+              }
+              break;
+          }
+
+          componentsHtml += `<div style="${style}">${content}</div>`;
+        }
+
+        badgesHtml += `
+          <div class="badge">
+            ${componentsHtml}
+          </div>
+        `;
+      }
+
+      // Create print HTML
+      const printHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Print Badges - ${eventName}</title>
+          <style>
+            @page {
+              size: ${badgeDimensions.width}mm ${badgeDimensions.height}mm;
+              margin: 0;
+            }
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            body {
+              margin: 0;
+              padding: 0;
+            }
+            .badge {
+              width: ${badgeDimensions.width}mm;
+              height: ${badgeDimensions.height}mm;
+              position: relative;
+              background-color: ${template.backgroundColor || '#ffffff'};
+              ${template.backgroundImageUrl ? `background-image: url('${template.backgroundImageUrl}'); background-size: ${template.backgroundImageFit || 'cover'}; background-position: center;` : ''}
+              overflow: hidden;
+              page-break-after: always;
+            }
+            .badge:last-child {
+              page-break-after: auto;
+            }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+          </style>
+        </head>
+        <body>
+          ${badgesHtml}
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+        </html>
+      `;
+
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+
+    } catch (error) {
+      console.error('Error printing badges:', error);
+      alert('An unexpected error occurred while printing. Please try again.');
     }
   };
 
@@ -1514,6 +1799,17 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </Button>
+            {/* Print Badges Button - Opens Template Selection Dialog */}
+            <Button 
+              onClick={() => setShowTemplateSelector(true)} 
+              variant="outline" 
+              size="sm" 
+              className="border-purple-300 hover:border-purple-400 text-purple-700 hover:bg-purple-50"
+              disabled={selectedParticipantIds.size === 0}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print Badges {selectedParticipantIds.size > 0 && `(${selectedParticipantIds.size})`}
+            </Button>
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
               <DialogTrigger asChild>
                 <Button className="gradient-primary hover:opacity-90 shadow-md shadow-purple-500/30">
@@ -1679,7 +1975,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           </SelectTrigger>
                           <SelectContent>
                             {emailTemplates.length === 0 ? (
-                              <SelectItem value="" disabled>No templates available</SelectItem>
+                              <SelectItem value="no-templates" disabled>No templates available</SelectItem>
                             ) : (
                               emailTemplates.map((template: any) => (
                                 <SelectItem key={template.id} value={template.id}>
@@ -2771,6 +3067,104 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Print Badge Template Selection Dialog */}
+    <Dialog open={showTemplateSelector} onOpenChange={setShowTemplateSelector}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Printer className="h-5 w-5 text-purple-600" />
+            Print Badges
+          </DialogTitle>
+          <DialogDescription>
+            Select a badge template to print {selectedParticipantIds.size} participant{selectedParticipantIds.size > 1 ? 's' : ''}.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4 py-4">
+          {availableTemplates.length > 0 ? (
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Badge Template</Label>
+              <Select
+                value={selectedBadgeTemplate?.id || ''}
+                onValueChange={(value) => {
+                  const template = availableTemplates.find(t => t.id === value);
+                  handleTemplateSelect(template || null);
+                }}
+              >
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="Select a template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTemplates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{template.name}</span>
+                        {template.is_default && (
+                          <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Default</span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : badgeTemplate ? (
+            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+              <p className="text-sm text-purple-800">
+                Using default badge template from event settings.
+              </p>
+            </div>
+          ) : (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                No badge templates found. Please create one in Badge Designer first.
+              </p>
+            </div>
+          )}
+          
+          {selectedBadgeTemplate && (
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-xs text-gray-600 mb-1">Selected Template</p>
+              <p className="font-medium text-gray-900">{selectedBadgeTemplate.name}</p>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <Button
+            variant="outline"
+            onClick={() => setShowTemplateSelector(false)}
+            className="px-4"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setShowTemplateSelector(false);
+              handlePrintBadges();
+            }}
+            disabled={!badgeTemplate && !selectedBadgeTemplate}
+            style={{ backgroundColor: '#7c3aed', color: 'white' }}
+            className="px-4 hover:opacity-90"
+          >
+            <Printer className="mr-2 h-4 w-4" />
+            Print
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Badge Print View - Hidden except when printing */}
+    {badgeTemplate && (
+      <BadgePrintView
+        participants={Array.from(selectedParticipantIds).map(id => 
+          participants.find(p => p.id === id)!
+        ).filter(Boolean)}
+        badgeTemplate={badgeTemplate}
+        eventName={eventName}
+      />
+    )}
     </>
   );
 }

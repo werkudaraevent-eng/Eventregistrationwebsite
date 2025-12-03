@@ -26,11 +26,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
-import { Search, QrCode, BarChart3, Loader2, CheckCircle2, X, Camera, Clock, AlertCircle, Printer, Settings } from 'lucide-react';
+import { Search, QrCode, BarChart3, Loader2, CheckCircle2, X, Camera, Clock, AlertCircle, Printer, FileText } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Html5Qrcode } from 'html5-qrcode';
 import QRCodeLib from 'qrcode';
 import { supabase } from '../utils/supabase/client';
 import type { AgendaItem, Participant, Event } from '../utils/localDBStub';
+import { loadBadgeTemplates, type BadgeTemplate } from './BadgeTemplateSelector';
 
 interface StandaloneCheckInPageProps {
   agendaId: string;
@@ -55,6 +57,8 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
   const [successMessage, setSuccessMessage] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [autoPrintBadge, setAutoPrintBadge] = useState(false);
+  const [availableTemplates, setAvailableTemplates] = useState<BadgeTemplate[]>([]);
+  const [selectedBadgeTemplate, setSelectedBadgeTemplate] = useState<BadgeTemplate | null>(null);
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
@@ -199,6 +203,18 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           branding: eventData.branding
         };
         setEvent(associatedEvent);
+        
+        // Load badge templates for this event
+        const templates = await loadBadgeTemplates(eventData.id);
+        setAvailableTemplates(templates);
+        
+        // Auto-select default template
+        const defaultTemplate = templates.find(t => t.is_default);
+        if (defaultTemplate) {
+          setSelectedBadgeTemplate(defaultTemplate);
+        } else if (templates.length > 0) {
+          setSelectedBadgeTemplate(templates[0]);
+        }
       } else {
         console.warn('[SECURITY] Event not found for eventId:', foundAgenda.eventId);
       }
@@ -295,8 +311,22 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         logoUrl: undefined
       };
 
-      // Check if event has badge_template in Supabase
-      if ((event as any).badge_template) {
+      // Priority 1: Use selected badge template from dropdown (badge_templates table)
+      if (selectedBadgeTemplate && selectedBadgeTemplate.template_data) {
+        const templateData = selectedBadgeTemplate.template_data;
+        badgeSettings = {
+          size: templateData.size || 'CR80',
+          customWidth: templateData.customWidth,
+          customHeight: templateData.customHeight,
+          backgroundColor: templateData.backgroundColor || '#ffffff',
+          backgroundImageUrl: templateData.backgroundImageUrl,
+          backgroundImageFit: templateData.backgroundImageFit || 'cover',
+          logoUrl: templateData.logoUrl
+        };
+        canvasLayout = templateData.components;
+      }
+      // Priority 2: Check if event has badge_template in Supabase (legacy)
+      else if ((event as any).badge_template) {
         const template = (event as any).badge_template;
         badgeSettings = {
           size: template.size || 'CR80',
@@ -327,16 +357,26 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         return;
       }
       
-      // Get badge dimensions
+      // Get badge dimensions - includes Indonesian ID card holder sizes
       const BADGE_SIZES: any = {
         CR80: { width: 85.6, height: 53.98 },
+        // Indonesian ID Card Holder Sizes (B Series - Landscape)
+        B1: { width: 85, height: 55 },
+        B2: { width: 105, height: 65 },
+        B3: { width: 105, height: 80 },
+        B4: { width: 130, height: 90 },
+        // Indonesian ID Card Holder Sizes (A Series - Portrait)
+        A1: { width: 55, height: 90 },
+        A2: { width: 65, height: 95 },
+        A3: { width: 80, height: 100 },
+        // Paper sizes
         A6: { width: 105, height: 148 },
         A7: { width: 74, height: 105 },
         custom: { width: badgeSettings.customWidth || 100, height: badgeSettings.customHeight || 150 }
       };
       
       // @ts-ignore - BadgeSettings properties from legacy schema
-      const selectedSize = BADGE_SIZES[badgeSettings.size || 'CR80'];
+      const selectedSize = BADGE_SIZES[badgeSettings.size || 'CR80'] || BADGE_SIZES.CR80;
       const width = selectedSize.width;
       const height = selectedSize.height;
       
@@ -360,7 +400,12 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
             ${backgroundImageStyle}
             box-sizing: border-box;
             position: relative;
-            border: 1px solid #ddd;
+            overflow: hidden;
+          }
+          @media screen {
+            .badge {
+              border: 1px solid #ddd;
+            }
           }
           .badge-component {
             position: absolute;
@@ -371,6 +416,10 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         canvasLayout
           .filter((c: any) => c.enabled)
           .forEach((component: any) => {
+            // Map text-align to justify-content for flexbox
+            const textAlign = component.textAlign || 'left';
+            const justifyContent = textAlign === 'center' ? 'center' : textAlign === 'right' ? 'flex-end' : 'flex-start';
+            
             const componentStyle = `
               left: ${component.x}%;
               top: ${component.y}%;
@@ -380,10 +429,10 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               font-family: ${component.fontFamily || 'sans-serif'};
               font-weight: ${component.fontWeight || 'normal'};
               font-style: ${component.fontStyle || 'normal'};
-              text-align: ${component.textAlign || 'left'};
               color: ${component.color || '#000000'};
               display: flex;
               align-items: center;
+              justify-content: ${justifyContent};
             `;
             
             if (component.type === 'eventName') {
@@ -392,17 +441,15 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               const value = component.fieldName.startsWith('custom_') 
                 ? participant.customData?.[component.fieldName] 
                 : (participant as any)[component.fieldName];
+              // Only show the value, not the label
               badgeContent += `
                 <div class="badge-component" style="${componentStyle}">
-                  <div style="width: 100%;">
-                    <div style="opacity: 0.6; font-size: 0.7em;">${component.label}</div>
-                    <div>${value || '-'}</div>
-                  </div>
+                  <span>${value || '-'}</span>
                 </div>
               `;
             } else if (component.type === 'qrcode') {
               badgeContent += `
-                <div class="badge-component" style="${componentStyle} justify-content: center;">
+                <div class="badge-component" style="${componentStyle}">
                   <img src="${qrCodeUrl}" style="width: 100%; height: 100%; object-fit: contain;" />
                 </div>
               `;
@@ -410,7 +457,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               const logoUrl = badgeSettings.logoUrl || event.branding?.logoUrl;
               if (logoUrl) {
                 badgeContent += `
-                  <div class="badge-component" style="${componentStyle} justify-content: center;">
+                  <div class="badge-component" style="${componentStyle}">
                     <img src="${logoUrl}" style="width: 100%; height: 100%; object-fit: contain;" />
                   </div>
                 `;
@@ -443,11 +490,13 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
             display: flex;
             flex-direction: column;
             justify-content: center;
-            // @ts-ignore - alignment property from legacy schema
             align-items: ${(badgeSettings as any).alignment === 'left' ? 'flex-start' : (badgeSettings as any).alignment === 'right' ? 'flex-end' : 'center'};
-            // @ts-ignore
-            text-align: ${(badgeSettings as any).alignment};
-            border: 1px solid #ddd;
+            text-align: ${(badgeSettings as any).alignment || 'center'};
+          }
+          @media screen {
+            .badge {
+              border: 1px solid #ddd;
+            }
           }
         `;
         
@@ -488,24 +537,33 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           <head>
             <title>Badge - ${participant.name}</title>
             <style>
-              @media print {
-                @page {
-                  size: ${width}mm ${height}mm;
-                  margin: 0;
-                }
-                body {
-                  margin: 0;
-                  padding: 0;
-                }
+              @page {
+                size: ${width}mm ${height}mm;
+                margin: 0;
+              }
+              * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+              }
+              html, body {
+                width: ${width}mm;
+                height: ${height}mm;
+                margin: 0;
+                padding: 0;
               }
               body {
                 font-family: Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
+              }
+              @media print {
+                html, body {
+                  width: ${width}mm;
+                  height: ${height}mm;
+                }
+                body {
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
               }
               ${badgeStyles}
             </style>
@@ -531,15 +589,6 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       console.error('Error printing badge:', error);
       alert('Failed to print badge');
     }
-  };
-
-  const openBadgeDesigner = () => {
-    if (!event) return;
-    const designerUrl = new URL(window.location.origin + window.location.pathname);
-    designerUrl.searchParams.set('designer', event.id);
-    // Add referrer so we can go back to check-in page after save
-    designerUrl.searchParams.set('from', `checkin=${agendaId}`);
-    window.open(designerUrl.toString(), '_blank', 'noopener');
   };
 
   const handleSearch = (query: string) => {
@@ -852,7 +901,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
 
       {/* Badge Settings */}
       <div className="max-w-md mx-auto mb-6">
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20 space-y-3">
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Printer className="h-4 w-4 text-white" />
@@ -866,15 +915,45 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               onCheckedChange={setAutoPrintBadge}
             />
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openBadgeDesigner}
-            className="w-full bg-white/10 hover:bg-white/20 text-white border-white/30"
-          >
-            <Settings className="mr-2 h-4 w-4" />
-            Design Badge Template
-          </Button>
+          
+          {/* Badge Template Selector */}
+          {autoPrintBadge && availableTemplates.length > 0 && (
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/20">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-white/70" />
+                <Label className="text-white text-sm">Badge Template</Label>
+              </div>
+              <Select
+                value={selectedBadgeTemplate?.id || ''}
+                onValueChange={(value) => {
+                  const template = availableTemplates.find(t => t.id === value);
+                  setSelectedBadgeTemplate(template || null);
+                }}
+              >
+                <SelectTrigger className="w-[160px] h-8 text-xs bg-white/10 border-white/30 text-white">
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTemplates.map((template) => (
+                    <SelectItem key={template.id} value={template.id} className="text-xs">
+                      <div className="flex items-center gap-1">
+                        <span>{template.name}</span>
+                        {template.is_default && (
+                          <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded">Default</span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          
+          {autoPrintBadge && availableTemplates.length === 0 && (
+            <p className="text-white/60 text-xs mt-2 text-center">
+              No badge templates found. Create one in Badge Designer.
+            </p>
+          )}
         </div>
       </div>
 
