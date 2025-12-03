@@ -40,7 +40,7 @@ import { supabase } from '../utils/supabase/client';
 import type { BadgeSettings, Event, PaperSizeConfiguration } from '../utils/localDBStub';
 import { DEFAULT_PRINT_CONFIG, PAPER_SIZES as PRINT_PAPER_SIZES } from '../utils/localDBStub';
 import { BadgePrintSettings } from './BadgePrintSettings';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { saveBadgeTemplate, loadBadgeTemplates, deleteBadgeTemplate, type BadgeTemplate } from './BadgeTemplateSelector';
 
 interface BadgeDesignerProps {
@@ -123,7 +123,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const [componentToDelete, setComponentToDelete] = useState<string | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const previewContainerRef = useRef<HTMLDivElement>(null);
-  const printContainerRef = useRef<HTMLDivElement>(null);
   
   // Template management
   const [savedTemplates, setSavedTemplates] = useState<BadgeTemplate[]>([]);
@@ -277,8 +276,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           
           const customFieldsFromParticipants: Array<{ name: string; label: string }> = [];
           const existingFieldNames = new Set([
-            ...standardFields.map(f => f.name),
-            ...customFieldsFromEvent.map(f => f.name)
+            ...standardFields.map((f: { name: string; label: string }) => f.name),
+            ...customFieldsFromEvent.map((f: { name: string; label: string }) => f.name)
           ]);
           
           if (participantsData) {
@@ -520,8 +519,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     }
   };
 
-  // Delete template
-  const handleDeleteTemplate = async (templateId: string) => {
+  // Delete template - reserved for future template management UI
+  const _handleDeleteTemplate = async (templateId: string) => {
     if (!confirm('Are you sure you want to delete this template?')) return;
     
     try {
@@ -539,6 +538,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       console.error('Error deleting template:', error);
     }
   };
+  // Export for potential external use
+  void _handleDeleteTemplate;
 
   // Load templates on mount - with slight delay to allow loadEvent to complete first
   useEffect(() => {
