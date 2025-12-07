@@ -66,6 +66,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
   const [showParticipantCard, setShowParticipantCard] = useState(false);
   const [showBigSuccess, setShowBigSuccess] = useState(false);
   const [wasAlreadyCheckedIn, setWasAlreadyCheckedIn] = useState(false); // Track if participant was already checked in BEFORE this scan
+  const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment'); // 'environment' = back camera, 'user' = front camera
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
@@ -690,7 +691,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       console.log("[SCANNER] Config:", config);
 
       await html5QrCodeRef.current.start(
-        { facingMode: "environment" },
+        { facingMode: cameraFacing },
         config,
         async (decodedText) => {
           console.log("[SCANNER] QR Code detected:", decodedText);
@@ -1117,6 +1118,35 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
                   </p>
                 )}
               </div>
+              
+              <div className="border-t pt-3" />
+              
+              {/* Camera Selection */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm">Scanner Camera</Label>
+                </div>
+                <Select
+                  value={cameraFacing}
+                  onValueChange={(value: 'environment' | 'user') => setCameraFacing(value)}
+                >
+                  <SelectTrigger className="w-full h-9 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="environment" className="text-sm">
+                      Back Camera (Default)
+                    </SelectItem>
+                    <SelectItem value="user" className="text-sm">
+                      Front Camera
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Change will apply on next scan
+                </p>
+              </div>
             </div>
           </PopoverContent>
         </Popover>
@@ -1370,7 +1400,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
 
       {/* Dashboard Dialog */}
       <Dialog open={showDashboardDialog} onOpenChange={setShowDashboardDialog}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[80vw] max-w-[80vw] max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Check-In Dashboard - {agenda.title}</DialogTitle>
           </DialogHeader>
@@ -1378,7 +1408,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
             {/* Event Security Badge */}
             {event && (
               <div className="mb-4 p-3 bg-info-light border-info-light rounded-lg">
-                <div className="flex items-center justify-center gap-2 text-sm">
+                <div className="flex items-center justify-center gap-2 text-sm flex-wrap">
                   <span className="status-dot status-dot-info status-dot-pulse"></span>
                   <span className="text-info-dark">Event:</span>
                   <span className="font-semibold text-primary-900">{event.name}</span>
@@ -1407,41 +1437,43 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
                 <p>No participants checked in yet</p>
               </div>
             ) : (
-              <div className="border rounded-lg">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Position</TableHead>
-                      <TableHead>Check-In Time</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {checkedInParticipants.map((participant) => {
-                      const attendance = participant.attendance.find(
-                        a => a.agendaItem === agenda.title
-                      );
-                      return (
-                        <TableRow key={participant.id}>
-                          <TableCell>{participant.name}</TableCell>
-                          <TableCell className="text-sm">{participant.email}</TableCell>
-                          <TableCell>{participant.company || '-'}</TableCell>
-                          <TableCell>{participant.position || '-'}</TableCell>
-                          <TableCell>
-                            {attendance && (
-                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                <Clock className="h-3 w-3" />
-                                {new Date(attendance.timestamp).toLocaleTimeString()}
-                              </div>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+              <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <Table className="min-w-full">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[150px]">Name</TableHead>
+                        <TableHead className="min-w-[200px]">Email</TableHead>
+                        <TableHead className="min-w-[180px]">Company</TableHead>
+                        <TableHead className="min-w-[120px]">Position</TableHead>
+                        <TableHead className="min-w-[120px]">Check-In Time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {checkedInParticipants.map((participant) => {
+                        const attendance = participant.attendance.find(
+                          a => a.agendaItem === agenda.title
+                        );
+                        return (
+                          <TableRow key={participant.id}>
+                            <TableCell className="font-medium">{participant.name}</TableCell>
+                            <TableCell className="text-sm break-all">{participant.email}</TableCell>
+                            <TableCell>{participant.company || '-'}</TableCell>
+                            <TableCell>{participant.position || '-'}</TableCell>
+                            <TableCell>
+                              {attendance && (
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground whitespace-nowrap">
+                                  <Clock className="h-3 w-3 flex-shrink-0" />
+                                  {new Date(attendance.timestamp).toLocaleTimeString()}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             )}
           </div>
@@ -1642,8 +1674,11 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       #qr-reader-standalone canvas {
         width: 100% !important;
         height: auto !important;
-        object-fit: cover; /* This makes the video cover the box nicely */
-        min-height: 300px; /* Match your container's min-height */
+        object-fit: cover;
+        min-height: 300px;
+        /* Remove mirror effect - important for QR scanning accuracy */
+        transform: scaleX(1) !important;
+        -webkit-transform: scaleX(1) !important;
       }
     `}</style>
     </div>

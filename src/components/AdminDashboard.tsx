@@ -111,42 +111,42 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
       <main className="container mx-auto px-6 py-8">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-8">
-          <TabsList className="flex flex-wrap justify-center w-full max-w-5xl mx-auto gap-1.5 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 overflow-x-auto">
-            <TabsTrigger value="participants" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Users className="h-4 w-4 flex-shrink-0" />
-              <span>Participants</span>
+          <TabsList className="flex justify-center w-full max-w-5xl mx-auto gap-0.5 xl:gap-1 bg-white/80 backdrop-blur-sm p-1.5 xl:p-2 rounded-2xl shadow-md border border-gray-200">
+            <TabsTrigger value="participants" className="tab-responsive tab-active-gradient" title="Participants">
+              <Users className="tab-icon" />
+              <span className="tab-label">Participants</span>
             </TabsTrigger>
-            <TabsTrigger value="agenda" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Calendar className="h-4 w-4 flex-shrink-0" />
-              <span>Agenda</span>
+            <TabsTrigger value="agenda" className="tab-responsive tab-active-gradient" title="Agenda">
+              <Calendar className="tab-icon" />
+              <span className="tab-label">Agenda</span>
             </TabsTrigger>
-            <TabsTrigger value="branding" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Palette className="h-4 w-4 flex-shrink-0" />
-              <span>Branding</span>
+            <TabsTrigger value="branding" className="tab-responsive tab-active-gradient" title="Branding">
+              <Palette className="tab-icon" />
+              <span className="tab-label">Branding</span>
             </TabsTrigger>
-            <TabsTrigger value="badge-design" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <CreditCard className="h-4 w-4 flex-shrink-0" />
-              <span>Badge</span>
+            <TabsTrigger value="badge-design" className="tab-responsive tab-active-gradient" title="Badge">
+              <CreditCard className="tab-icon" />
+              <span className="tab-label">Badge</span>
             </TabsTrigger>
-            <TabsTrigger value="seating" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <LayoutGrid className="h-4 w-4 flex-shrink-0" />
-              <span>Seating</span>
+            <TabsTrigger value="seating" className="tab-responsive tab-active-gradient" title="Seating">
+              <LayoutGrid className="tab-icon" />
+              <span className="tab-label">Seating</span>
             </TabsTrigger>
-            <TabsTrigger value="emails" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Mail className="h-4 w-4 flex-shrink-0" />
-              <span>Templates</span>
+            <TabsTrigger value="emails" className="tab-responsive tab-active-gradient" title="Templates">
+              <Mail className="tab-icon" />
+              <span className="tab-label">Templates</span>
             </TabsTrigger>
-            <TabsTrigger value="blast" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Send className="h-4 w-4 flex-shrink-0" />
-              <span>Blast</span>
+            <TabsTrigger value="blast" className="tab-responsive tab-active-gradient" title="Blast">
+              <Send className="tab-icon" />
+              <span className="tab-label">Blast</span>
             </TabsTrigger>
-            <TabsTrigger value="email-config" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <Settings className="h-4 w-4 flex-shrink-0" />
-              <span>Settings</span>
+            <TabsTrigger value="email-config" className="tab-responsive tab-active-gradient" title="Settings">
+              <Settings className="tab-icon" />
+              <span className="tab-label">Settings</span>
             </TabsTrigger>
-            <TabsTrigger value="email-history" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
-              <History className="h-4 w-4 flex-shrink-0" />
-              <span>History</span>
+            <TabsTrigger value="email-history" className="tab-responsive tab-active-gradient" title="History">
+              <History className="tab-icon" />
+              <span className="tab-label">History</span>
             </TabsTrigger>
           </TabsList>
 

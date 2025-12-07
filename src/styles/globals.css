@@ -304,6 +304,14 @@ html {
 
 /* Modern gradient utilities */
 @layer utilities {
+  /* Dialog width utilities - use !important to override Tailwind defaults */
+  .w-\[80vw\] {
+    width: 80vw !important;
+  }
+  
+  .max-w-\[80vw\] {
+    max-width: 80vw !important;
+  }
   .gradient-primary {
     background: linear-gradient(135deg, var(--primary-gradient-from) 0%, var(--primary-gradient-to) 100%);
   }
@@ -443,6 +451,50 @@ html {
     background: linear-gradient(135deg, var(--primary-gradient-from) 0%, var(--primary-gradient-to) 100%);
     color: white;
     box-shadow: 0 4px 14px 0 rgba(37, 99, 235, 0.3);
+  }
+  
+  /* Tab hover effect */
+  .tab-active-gradient:not([data-state="active"]):hover {
+    background-color: rgba(37, 99, 235, 0.1);
+    color: var(--primary-700);
+  }
+  
+  /* Responsive tab - icon only on small screens */
+  .tab-responsive {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border-radius: 0.75rem;
+    transition: all 0.3s ease;
+    font-size: 0.75rem;
+    padding: 0.625rem;
+  }
+  
+  .tab-responsive .tab-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+  }
+  
+  .tab-responsive .tab-label {
+    display: none;
+  }
+  
+  /* Show labels on xl screens (1280px+) */
+  @media (min-width: 1280px) {
+    .tab-responsive {
+      padding: 0.5rem 0.75rem;
+    }
+    
+    .tab-responsive .tab-icon {
+      width: 1rem;
+      height: 1rem;
+    }
+    
+    .tab-responsive .tab-label {
+      display: inline;
+    }
   }
   
   /* Status indicator dots */
