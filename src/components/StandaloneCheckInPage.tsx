@@ -26,7 +26,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Switch } from './ui/switch';
 import { Label } from './ui/label';
-import { Search, QrCode, BarChart3, Loader2, CheckCircle2, X, Camera, Clock, AlertCircle, Printer, FileText } from 'lucide-react';
+import { Search, QrCode, BarChart3, Loader2, CheckCircle2, X, Camera, Clock, AlertCircle, Printer, FileText, Settings } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Html5Qrcode } from 'html5-qrcode';
 import QRCodeLib from 'qrcode';
@@ -55,10 +56,16 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
   const [error, setError] = useState<string | null>(null);
   const [showSuccessDialog, setShowSuccessDialog] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [successType, setSuccessType] = useState<'checkin' | 'undo' | 'warning'>('checkin');
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [autoPrintBadge, setAutoPrintBadge] = useState(false);
+  const [autoCheckIn, setAutoCheckIn] = useState(true);
   const [availableTemplates, setAvailableTemplates] = useState<BadgeTemplate[]>([]);
   const [selectedBadgeTemplate, setSelectedBadgeTemplate] = useState<BadgeTemplate | null>(null);
+  const [scannedParticipant, setScannedParticipant] = useState<Participant | null>(null);
+  const [showParticipantCard, setShowParticipantCard] = useState(false);
+  const [showBigSuccess, setShowBigSuccess] = useState(false);
+  const [wasAlreadyCheckedIn, setWasAlreadyCheckedIn] = useState(false); // Track if participant was already checked in BEFORE this scan
   const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {
@@ -140,6 +147,19 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       setCheckedInParticipants(checkedIn);
     }
   }, [agenda, participants]);
+
+  // Sync searchResults when participants change (for real-time button updates)
+  useEffect(() => {
+    if (searchQuery && participants.length > 0) {
+      const lowerQuery = searchQuery.toLowerCase();
+      const results = participants.filter(p =>
+        p.name?.toLowerCase().includes(lowerQuery) ||
+        p.email?.toLowerCase().includes(lowerQuery) ||
+        p.company?.toLowerCase().includes(lowerQuery)
+      );
+      setSearchResults(results);
+    }
+  }, [participants]);
 
   const fetchAgenda = async () => {
     setIsLoading(true);
@@ -288,6 +308,12 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       console.log('='.repeat(80));
       
       setCheckedInParticipants(checkedIn);
+      
+      // Update scanned participant if exists (to sync check-in status)
+      if (scannedParticipant) {
+        const updated = eventParticipants.find((p: any) => p.id === scannedParticipant.id);
+        if (updated) setScannedParticipant(updated);
+      }
       
     } catch (err: any) {
       console.error('[SECURITY] Error fetching participants:', err);
@@ -438,9 +464,18 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
             if (component.type === 'eventName') {
               badgeContent += `<div class="badge-component" style="${componentStyle}">${event.name}</div>`;
             } else if (component.type === 'field' && component.fieldName) {
-              const value = component.fieldName.startsWith('custom_') 
-                ? participant.customData?.[component.fieldName] 
-                : (participant as any)[component.fieldName];
+              // Get field value - check standard fields first, then customData
+              const standardFields = ['name', 'email', 'phone', 'company', 'position'];
+              const fieldName = component.fieldName;
+              let value: string | undefined;
+              
+              if (standardFields.includes(fieldName)) {
+                value = (participant as any)[fieldName];
+              } else {
+                // Custom field - check in customData
+                value = participant.customData?.[fieldName];
+              }
+              
               // Only show the value, not the label
               badgeContent += `
                 <div class="badge-component" style="${componentStyle}">
@@ -512,9 +547,17 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               // @ts-ignore - fontSize from legacy schema
               badgeContent += `<div style="font-size: ${fontSizes[(badgeSettings as any).fontSize || 'medium'].title}; font-weight: bold; margin: 8px 0;">${event.name}</div>`;
             } else if (component.type === 'field' && component.fieldName) {
-              const value = component.fieldName.startsWith('custom_') 
-                ? participant.customData?.[component.fieldName] 
-                : (participant as any)[component.fieldName];
+              // Get field value - check standard fields first, then customData
+              const standardFields = ['name', 'email', 'phone', 'company', 'position'];
+              const fieldName = component.fieldName;
+              let value: string | undefined;
+              
+              if (standardFields.includes(fieldName)) {
+                value = (participant as any)[fieldName];
+              } else {
+                // Custom field - check in customData
+                value = participant.customData?.[fieldName];
+              }
               // @ts-ignore
               badgeContent += `
                 <div style="margin: 8px 0;">
@@ -653,13 +696,52 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           console.log("[SCANNER] QR Code detected:", decodedText);
           
           setScanSuccess(true);
-          
           await stopCamera();
           
-          setTimeout(async () => {
-            setScanSuccess(false);
-            await handleCheckIn(decodedText);
-          }, 1500);
+          // Find participant first
+          const cleanId = decodedText.trim();
+          const foundParticipant = participants.find(p => p.id === cleanId);
+          
+          if (foundParticipant) {
+            // Check if already checked in BEFORE setting state
+            const isAlreadyCheckedIn = foundParticipant.attendance?.some(
+              (a: any) => a.agendaItem === agenda?.title
+            );
+            
+            setScannedParticipant(foundParticipant);
+            setWasAlreadyCheckedIn(isAlreadyCheckedIn);
+            
+            if (autoCheckIn) {
+              // Auto check-in mode
+              if (isAlreadyCheckedIn) {
+                // Already checked in - just show participant card with warning
+                setTimeout(() => {
+                  setScanSuccess(false);
+                  setShowScanDialog(false);
+                  setShowParticipantCard(true);
+                }, 500);
+              } else {
+                // Not checked in yet - proceed with check-in
+                setTimeout(async () => {
+                  setScanSuccess(false);
+                  await handleCheckIn(decodedText);
+                }, 500);
+              }
+            } else {
+              // Manual mode: show participant card for confirmation
+              setTimeout(() => {
+                setScanSuccess(false);
+                setShowScanDialog(false);
+                setShowParticipantCard(true);
+              }, 1000);
+            }
+          } else {
+            // Participant not found
+            setTimeout(async () => {
+              setScanSuccess(false);
+              await handleCheckIn(decodedText); // This will show error
+            }, 500);
+          }
         },
         (errorMessage) => {
           // Verbose error logging during scan attempts
@@ -753,9 +835,13 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       );
       
       if (alreadyCheckedIn) {
-        // Show warning but don't fail
-        setSuccessMessage(`${participant.name} is already checked in!`);
-        setShowSuccessDialog(true);
+        // Already checked in - show participant card with warning indicator
+        setWasAlreadyCheckedIn(true); // Mark that this was already checked in
+        setScannedParticipant(participant);
+        setShowScanDialog(false);
+        setShowParticipantCard(true);
+        // Don't show big success for already checked in
+        setShowBigSuccess(false);
       } else {
         // Record attendance in Supabase
         const updatedAttendance = [...(participant.attendance || []), {
@@ -774,9 +860,14 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           throw new Error(`Failed to record attendance: ${updateError.message}`);
         }
         
-        // Show success message
-        setSuccessMessage(`✓ Check-in successful for ${participant.name}`);
-        setShowSuccessDialog(true);
+        // Update scanned participant reference
+        setScannedParticipant({ ...participant, attendance: updatedAttendance });
+        
+        // Show big success animation (like Eventnook)
+        setWasAlreadyCheckedIn(false); // This is a fresh check-in
+        setShowBigSuccess(true);
+        setShowScanDialog(false);
+        setShowParticipantCard(true);
         
         // Auto-print badge if enabled
         if (autoPrintBadge) {
@@ -784,20 +875,81 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
             printBadge(participant);
           }, 500);
         }
+        
+        // Hide big success after 2 seconds
+        setTimeout(() => {
+          setShowBigSuccess(false);
+        }, 2000);
       }
       
       // Refresh participants list
       await fetchParticipants();
       
-      // Close dialogs after a short delay
-      setTimeout(() => {
-        setShowScanDialog(false);
-        setShowSearchDialog(false);
-      }, 1500);
-      
     } catch (err: any) {
       console.error('[LOCAL] Error recording attendance:', err);
       alert(err.message || 'Failed to record attendance. Please try again.');
+    } finally {
+      setIsRecording(false);
+    }
+  };
+
+  const handleUndoCheckIn = async (participantId: string) => {
+    if (!agenda) {
+      console.error('[SECURITY] Cannot undo check-in - agenda not loaded');
+      return;
+    }
+    
+    if (!agenda.eventId) {
+      console.error('[SECURITY] Cannot undo check-in - agenda missing eventId');
+      return;
+    }
+
+    setIsRecording(true);
+    try {
+      const cleanId = participantId.trim();
+      console.log('[UNDO] Attempting to undo check-in for participant:', cleanId);
+      
+      // Fetch participant from Supabase
+      const { data: participantData, error: participantError } = await supabase
+        .from('participants')
+        .select('*')
+        .eq('id', cleanId)
+        .eq('eventId', agenda.eventId)
+        .single();
+      
+      if (participantError || !participantData) {
+        throw new Error(`Participant not found with ID: ${cleanId}`);
+      }
+
+      const participant = participantData;
+      
+      // Remove attendance record for this agenda
+      const updatedAttendance = (participant.attendance || []).filter(
+        (a: any) => a.agendaItem !== agenda.title
+      );
+      
+      console.log('[UNDO] Removing attendance for session:', agenda.title);
+      
+      const { error: updateError } = await supabase
+        .from('participants')
+        .update({ attendance: updatedAttendance })
+        .eq('id', cleanId);
+      
+      if (updateError) {
+        throw new Error(`Failed to undo check-in: ${updateError.message}`);
+      }
+      
+      // Show success message
+      setSuccessMessage(`Check-in removed for ${participant.name}`);
+      setSuccessType('undo');
+      setShowSuccessDialog(true);
+      
+      // Refresh participants list (useEffect will auto-sync searchResults)
+      await fetchParticipants();
+      
+    } catch (err: any) {
+      console.error('[UNDO] Error undoing check-in:', err);
+      alert(err.message || 'Failed to undo check-in. Please try again.');
     } finally {
       setIsRecording(false);
     }
@@ -871,13 +1023,111 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-400 via-blue-500 to-blue-600 p-6 relative">
+      {/* Settings Button - Top Right */}
+      <div className="absolute top-4 right-4 z-10">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="bg-white/20 hover:bg-white/30 text-white border border-white/30 backdrop-blur-sm"
+            >
+              <Settings className="h-5 w-5" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80" align="end">
+            <div className="space-y-4">
+              <h4 className="font-medium text-sm">Check-in Settings</h4>
+              
+              {/* Auto Check-in Toggle */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${autoCheckIn ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+                    <Label htmlFor="auto-checkin-popover" className="text-sm">
+                      Auto Check-in
+                    </Label>
+                  </div>
+                  <Switch
+                    id="auto-checkin-popover"
+                    checked={autoCheckIn}
+                    onCheckedChange={setAutoCheckIn}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground pl-4">
+                  {autoCheckIn 
+                    ? 'Check in immediately when QR is scanned' 
+                    : 'Show participant info first'}
+                </p>
+              </div>
+              
+              <div className="border-t pt-3" />
+              
+              {/* Auto Print Toggle */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Printer className="h-4 w-4 text-muted-foreground" />
+                  <Label htmlFor="auto-print-popover" className="text-sm">
+                    Auto-Print Badge
+                  </Label>
+                </div>
+                <Switch
+                  id="auto-print-popover"
+                  checked={autoPrintBadge}
+                  onCheckedChange={setAutoPrintBadge}
+                />
+              </div>
+              
+              <div className="border-t pt-3" />
+              
+              {/* Badge Template Selector */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm">Badge Template</Label>
+                </div>
+                {availableTemplates.length > 0 ? (
+                  <Select
+                    value={selectedBadgeTemplate?.id || ''}
+                    onValueChange={(value) => {
+                      const template = availableTemplates.find(t => t.id === value);
+                      setSelectedBadgeTemplate(template || null);
+                    }}
+                  >
+                    <SelectTrigger className="w-full h-9 text-sm">
+                      <SelectValue placeholder="Select template" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableTemplates.map((template) => (
+                        <SelectItem key={template.id} value={template.id} className="text-sm">
+                          <div className="flex items-center gap-2">
+                            <span>{template.name}</span>
+                            {template.is_default && (
+                              <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">Default</span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No templates found. Create one in Badge Designer.
+                  </p>
+                )}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
       {/* Event Security Badge */}
       {event && (
         <div className="max-w-2xl mx-auto mb-4">
           <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 text-white border border-white/30">
             <div className="flex items-center justify-center gap-2 text-sm">
-              <span className="inline-block w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+              <span className="status-dot status-dot-success status-dot-pulse"></span>
               <span className="opacity-90">Event:</span>
               <span className="font-semibold">{event.name}</span>
               <span className="mx-2 opacity-50">•</span>
@@ -899,69 +1149,11 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         )}
       </div>
 
-      {/* Badge Settings */}
-      <div className="max-w-md mx-auto mb-6">
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 border border-white/20">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Printer className="h-4 w-4 text-white" />
-              <Label htmlFor="auto-print" className="text-white text-sm">
-                Auto-Print Badge on Check-In
-              </Label>
-            </div>
-            <Switch
-              id="auto-print"
-              checked={autoPrintBadge}
-              onCheckedChange={setAutoPrintBadge}
-            />
-          </div>
-          
-          {/* Badge Template Selector */}
-          {autoPrintBadge && availableTemplates.length > 0 && (
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/20">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-white/70" />
-                <Label className="text-white text-sm">Badge Template</Label>
-              </div>
-              <Select
-                value={selectedBadgeTemplate?.id || ''}
-                onValueChange={(value) => {
-                  const template = availableTemplates.find(t => t.id === value);
-                  setSelectedBadgeTemplate(template || null);
-                }}
-              >
-                <SelectTrigger className="w-[160px] h-8 text-xs bg-white/10 border-white/30 text-white">
-                  <SelectValue placeholder="Select template" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTemplates.map((template) => (
-                    <SelectItem key={template.id} value={template.id} className="text-xs">
-                      <div className="flex items-center gap-1">
-                        <span>{template.name}</span>
-                        {template.is_default && (
-                          <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded">Default</span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          
-          {autoPrintBadge && availableTemplates.length === 0 && (
-            <p className="text-white/60 text-xs mt-2 text-center">
-              No badge templates found. Create one in Badge Designer.
-            </p>
-          )}
-        </div>
-      </div>
-
       {/* Action Buttons */}
       <div className="max-w-md mx-auto space-y-4">
         <Button
           onClick={openSearchDialog}
-          className="w-full h-16 bg-gray-900 hover:bg-gray-800 text-white text-lg"
+          className="w-full h-16 bg-neutral-900 hover:bg-neutral-800 text-white text-lg"
           size="lg"
         >
           <Search className="mr-3 h-6 w-6" />
@@ -970,7 +1162,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
 
         <Button
           onClick={openScanDialog}
-          className="w-full h-16 bg-gray-900 hover:bg-gray-800 text-white text-lg"
+          className="w-full h-16 bg-neutral-900 hover:bg-neutral-800 text-white text-lg"
           size="lg"
         >
           <QrCode className="mr-3 h-6 w-6" />
@@ -981,7 +1173,7 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
         <div className="text-white text-center text-sm mt-6 space-y-2">
           <div className="bg-white/10 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/20">
             <div className="flex items-center justify-center gap-2 mb-2">
-              <span className="inline-block w-2 h-2 bg-green-400 rounded-full"></span>
+              <span className="status-dot status-dot-success"></span>
               <div className="opacity-75 text-xs">Secure Event Scope Active</div>
             </div>
             <div className="font-semibold">{event?.name || 'Loading...'}</div>
@@ -1018,63 +1210,59 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
 
       {/* Search Dialog */}
       <Dialog open={showSearchDialog} onOpenChange={setShowSearchDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-md sm:max-w-lg max-h-[80vh] overflow-hidden flex flex-col w-[95vw]">
           <DialogHeader>
             <DialogTitle>Search Participants</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search by name, email, or company..."
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                autoFocus
-              />
-            </div>
+            <Input
+              placeholder="Search by name, email, or company..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              autoFocus
+            />
 
-            <div className="flex-1 overflow-y-auto border rounded-lg">
+            <div className="flex-1 overflow-y-auto">
               {searchResults.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Company</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {searchResults.map((participant) => {
-                      const isCheckedIn = participant.attendance?.some(
-                        a => a.agendaItem === agenda.title
-                      );
-                      return (
-                        <TableRow key={participant.id}>
-                          <TableCell>
-                            <div>
-                              <div>{participant.name}</div>
-                              <div className="text-sm text-muted-foreground">
-                                {participant.email}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>{participant.company || '-'}</TableCell>
-                          <TableCell>
-                            {isCheckedIn ? (
-                              <span className="text-green-600 flex items-center gap-1">
-                                <CheckCircle2 className="h-4 w-4" />
-                                Checked In
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">Not Checked In</span>
+                <div className="space-y-2">
+                  {searchResults.map((participant) => {
+                    const isCheckedIn = participant.attendance?.some(
+                      a => a.agendaItem === agenda?.title
+                    );
+                    return (
+                      <div 
+                        key={participant.id}
+                        className="p-3 border rounded-lg hover:bg-gray-50"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{participant.name}</div>
+                            <div className="text-sm text-muted-foreground truncate">{participant.email}</div>
+                            {participant.company && (
+                              <div className="text-xs text-muted-foreground truncate">{participant.company}</div>
                             )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {!isCheckedIn && (
+                          </div>
+                          <div>
+                            {isCheckedIn ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleUndoCheckIn(participant.id)}
+                                disabled={isRecording}
+                                style={{ color: '#ea580c', borderColor: '#fdba74', minWidth: '80px' }}
+                              >
+                                {isRecording ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  'Undo'
+                                )}
+                              </Button>
+                            ) : (
                               <Button
                                 size="sm"
                                 onClick={() => handleCheckIn(participant.id)}
                                 disabled={isRecording}
+                                style={{ backgroundColor: '#16a34a', color: 'white', minWidth: '80px' }}
                               >
                                 {isRecording ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1083,12 +1271,12 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
                                 )}
                               </Button>
                             )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
                 <div className="text-center py-12 text-muted-foreground">
                   {searchQuery ? (
@@ -1122,10 +1310,10 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               
               {/* Success Overlay */}
               {scanSuccess && (
-                <div className="absolute inset-0 bg-green-500/90 rounded-lg flex items-center justify-center z-50 animate-in fade-in">
+                <div className="absolute inset-0 bg-success/90 rounded-lg flex items-center justify-center z-50 animate-in fade-in">
                   <div className="text-center">
                     <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-4 animate-in zoom-in duration-500">
-                      <CheckCircle2 className="w-16 h-16 text-green-500" />
+                      <CheckCircle2 className="w-16 h-16 text-success" />
                     </div>
                     <p className="text-white text-xl">QR Code Detected!</p>
                   </div>
@@ -1189,13 +1377,13 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
           <div className="flex-1 overflow-y-auto">
             {/* Event Security Badge */}
             {event && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="mb-4 p-3 bg-info-light border-info-light rounded-lg">
                 <div className="flex items-center justify-center gap-2 text-sm">
-                  <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                  <span className="text-blue-700">Event:</span>
-                  <span className="font-semibold text-blue-900">{event.name}</span>
-                  <span className="mx-2 text-blue-400">•</span>
-                  <span className="text-xs text-blue-600">Isolated Data View</span>
+                  <span className="status-dot status-dot-info status-dot-pulse"></span>
+                  <span className="text-info-dark">Event:</span>
+                  <span className="font-semibold text-primary-900">{event.name}</span>
+                  <span className="mx-2 text-primary-400">•</span>
+                  <span className="text-xs text-info">Isolated Data View</span>
                 </div>
               </div>
             )}
@@ -1264,10 +1452,20 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
       <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
         <DialogContent className="max-w-md">
           <div className="text-center py-8">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-in zoom-in duration-500">
-              <CheckCircle2 className="w-12 h-12 text-green-600" />
+            <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 animate-in zoom-in duration-500 ${
+              successType === 'undo' ? 'bg-orange-100' : successType === 'warning' ? 'bg-yellow-100' : 'bg-success-light'
+            }`}>
+              {successType === 'undo' ? (
+                <X className="w-12 h-12 text-orange-600" />
+              ) : successType === 'warning' ? (
+                <AlertCircle className="w-12 h-12 text-yellow-600" />
+              ) : (
+                <CheckCircle2 className="w-12 h-12 text-success" />
+              )}
             </div>
-            <h3 className="text-2xl mb-2">Check-In Successful!</h3>
+            <h3 className="text-2xl mb-2">
+              {successType === 'undo' ? 'Check-In Undone' : successType === 'warning' ? 'Already Checked In' : 'Check-In Successful!'}
+            </h3>
             <p className="text-lg text-muted-foreground">{successMessage}</p>
             <Button
               onClick={() => setShowSuccessDialog(false)}
@@ -1277,6 +1475,165 @@ export function StandaloneCheckInPage({ agendaId }: StandaloneCheckInPageProps) 
               Close
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Big Success Animation Overlay (like Eventnook) */}
+      {showBigSuccess && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl p-8 shadow-2xl animate-in zoom-in duration-500">
+            <div className="w-32 h-32 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-20 h-20 text-green-500" strokeWidth={2.5} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Participant Card Dialog (after scan) */}
+      <Dialog open={showParticipantCard} onOpenChange={(open) => {
+        setShowParticipantCard(open);
+        if (!open) {
+          setScannedParticipant(null);
+          setShowBigSuccess(false);
+          setWasAlreadyCheckedIn(false);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          {scannedParticipant && (
+            <div className="space-y-4">
+              {/* Status Icon and Message */}
+              {(() => {
+                // Use wasAlreadyCheckedIn state instead of checking current attendance
+                // This prevents icon from changing after fetchParticipants updates the data
+                if (wasAlreadyCheckedIn) {
+                  // Was already checked in BEFORE this scan - show info (blue)
+                  return (
+                    <div className="flex flex-col items-center -mt-2 mb-2">
+                      <div className="w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center animate-in zoom-in duration-500">
+                        <CheckCircle2 className="w-16 h-16 text-blue-500" strokeWidth={2.5} />
+                      </div>
+                      <p className="text-blue-600 font-medium mt-2 text-lg">Already Checked In</p>
+                    </div>
+                  );
+                } else if (scannedParticipant.attendance?.some(a => a.agendaItem === agenda?.title)) {
+                  // Fresh check-in success - show green checkmark
+                  return (
+                    <div className="flex flex-col items-center -mt-2 mb-2">
+                      <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center animate-in zoom-in duration-500">
+                        <CheckCircle2 className="w-16 h-16 text-green-500" strokeWidth={2.5} />
+                      </div>
+                      <p className="text-green-600 font-medium mt-2 text-lg">Check-in Successful!</p>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              
+              {/* Scan Next Button */}
+              <Button
+                onClick={() => {
+                  setShowParticipantCard(false);
+                  setScannedParticipant(null);
+                  setShowBigSuccess(false);
+                  setWasAlreadyCheckedIn(false);
+                  setTimeout(() => openScanDialog(), 100);
+                }}
+                className="w-full bg-blue-500 hover:bg-blue-600 text-white"
+                size="lg"
+              >
+                <Camera className="mr-2 h-5 w-5" />
+                Scan Next
+              </Button>
+
+              {/* Participant Info Card */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                <div className="text-center">
+                  <h3 className="text-xl font-semibold text-gray-900">{scannedParticipant.name}</h3>
+                  <p className="text-sm text-gray-500">{scannedParticipant.email}</p>
+                  {scannedParticipant.company && (
+                    <p className="text-sm text-gray-500">{scannedParticipant.company}</p>
+                  )}
+                  {scannedParticipant.position && (
+                    <p className="text-xs text-gray-400">{scannedParticipant.position}</p>
+                  )}
+                </div>
+
+                {/* Tags/Status */}
+                <div className="flex flex-wrap justify-center gap-2">
+                  {scannedParticipant.attendance?.some(a => a.agendaItem === agenda?.title) && (
+                    <span className="px-3 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                      ✓ Checked In
+                    </span>
+                  )}
+                  {scannedParticipant.customData?.category && (
+                    <span className="px-3 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
+                      {scannedParticipant.customData.category}
+                    </span>
+                  )}
+                  {scannedParticipant.customData?.vip && (
+                    <span className="px-3 py-1 bg-yellow-100 text-yellow-700 text-xs font-medium rounded-full">
+                      VIP
+                    </span>
+                  )}
+                </div>
+
+                {/* Check-in Time */}
+                {(() => {
+                  const attendance = scannedParticipant.attendance?.find(a => a.agendaItem === agenda?.title);
+                  if (attendance) {
+                    return (
+                      <div className="flex items-center justify-center gap-2 text-sm text-gray-500 pt-2 border-t border-gray-200">
+                        <Clock className="h-4 w-4" />
+                        <span>Checked in at {new Date(attendance.timestamp).toLocaleTimeString('en-US', { 
+                          hour: '2-digit', 
+                          minute: '2-digit',
+                          hour12: true 
+                        })}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100"
+                  onClick={() => printBadge(scannedParticipant)}
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  Print
+                </Button>
+                {scannedParticipant.attendance?.some(a => a.agendaItem === agenda?.title) ? (
+                  <Button
+                    variant="outline"
+                    className="flex-1 bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100"
+                    onClick={async () => {
+                      await handleUndoCheckIn(scannedParticipant.id);
+                      // Refresh scanned participant
+                      const updated = participants.find(p => p.id === scannedParticipant.id);
+                      if (updated) setScannedParticipant(updated);
+                    }}
+                    disabled={isRecording}
+                  >
+                    {isRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Uncheck'}
+                  </Button>
+                ) : (
+                  <Button
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white"
+                    onClick={async () => {
+                      await handleCheckIn(scannedParticipant.id);
+                    }}
+                    disabled={isRecording}
+                  >
+                    {isRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Check In'}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

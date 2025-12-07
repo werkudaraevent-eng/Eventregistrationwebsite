@@ -383,7 +383,7 @@ export function ColumnManagement({ eventId, onFieldsUpdated }: ColumnManagementP
                             {field.name}
                           </TableCell>
                           <TableCell>
-                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded capitalize">
+                            <span className="text-xs bg-primary-100 text-primary-700 px-2 py-1 rounded capitalize">
                               {field.type}
                             </span>
                           </TableCell>

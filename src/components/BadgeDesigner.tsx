@@ -1,4 +1,4 @@
-﻿/**
+/**
  * BadgeDesigner - Advanced Drag-and-Drop Badge Customization Interface
  * 
  * Features:
@@ -20,7 +20,7 @@ import { Switch } from './ui/switch';
 import { 
   Save, QrCode, Image as ImageIcon, Type, CheckCircle2, 
   Plus, Trash2, AlignLeft, AlignCenter, AlignRight,
-  Bold, Italic, Upload, Minus, Undo2, Redo2, MousePointer2, FileText, Printer
+  Bold, Italic, Upload, Minus, Undo2, Redo2, MousePointer2, FileText, Printer, CreditCard
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import {
@@ -76,14 +76,14 @@ interface CanvasComponent {
 const BADGE_SIZES = {
   CR80: { width: 85.6, height: 53.98, label: 'CR80 (Credit Card)' },
   // Indonesian ID Card Holder Sizes (B Series - Landscape)
-  B1: { width: 85, height: 55, label: 'B1 (85×55mm)' },
-  B2: { width: 105, height: 65, label: 'B2 (105×65mm)' },
-  B3: { width: 105, height: 80, label: 'B3 (105×80mm)' },
-  B4: { width: 130, height: 90, label: 'B4 (130×90mm)' },
+  B1: { width: 85, height: 55, label: 'B1 (85x55mm)' },
+  B2: { width: 105, height: 65, label: 'B2 (105x65mm)' },
+  B3: { width: 105, height: 80, label: 'B3 (105x80mm)' },
+  B4: { width: 130, height: 90, label: 'B4 (130x90mm)' },
   // Indonesian ID Card Holder Sizes (A Series - Portrait)
-  A1: { width: 55, height: 90, label: 'A1 (55×90mm)' },
-  A2: { width: 65, height: 95, label: 'A2 (65×95mm)' },
-  A3: { width: 80, height: 100, label: 'A3 (80×100mm)' },
+  A1: { width: 55, height: 90, label: 'A1 (55x90mm)' },
+  A2: { width: 65, height: 95, label: 'A2 (65x95mm)' },
+  A3: { width: 80, height: 100, label: 'A3 (80x100mm)' },
   // Paper sizes
   A6: { width: 105, height: 148, label: 'A6 Paper' },
   A7: { width: 74, height: 105, label: 'A7 Paper' },
@@ -1038,7 +1038,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-100">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto"></div>
           <p className="mt-4 text-gray-600 font-medium">Loading Badge Designer...</p>
         </div>
       </div>
@@ -1054,15 +1054,19 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const selectedComponent = canvasComponents.find(c => c.id === selectedComponentId);
 
   return (
-    <div className="min-h-[calc(100vh-200px)] flex flex-col bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
-      <header className="flex-shrink-0 px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
-        <div className="ml-3">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-purple-600 to-purple-800 bg-clip-text text-transparent">
-            Badge Designer
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">{event.name}</p>
+    <div className="space-y-6">
+      {/* Header - Outside Card */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <CreditCard className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Badge Designer</h2>
+            <p className="text-sm text-gray-600 mt-1">{event.name}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3 mr-3">
+        <div className="flex items-center gap-3">
           {/* Undo/Redo buttons */}
           <TooltipProvider>
             <div className="flex items-center gap-1 mr-2 border-r border-gray-300 pr-4">
@@ -1105,12 +1109,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
             onClick={handleTestPrint}
             disabled={isPrinting}
             variant="outline"
-            className="px-4 h-10 border-purple-300 text-purple-700 hover:bg-purple-50"
+            className="px-4 h-10 border-primary-300 text-primary-700 hover:bg-primary-50"
           >
             {isPrinting ? (
               <>
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-600 border-t-transparent mr-2"></div>
-                Printing…
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary-600 border-t-transparent mr-2"></div>
+                Printing...
               </>
             ) : (
               <>
@@ -1129,12 +1133,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           <Button
             onClick={handleSave}
             disabled={isSaving}
-            className="px-8 h-10 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white border-none font-semibold shadow-lg hover:shadow-xl transition-all"
+            className="px-8 h-10 gradient-primary hover:opacity-90 text-white border-none font-semibold shadow-lg hover:shadow-xl transition-all"
           >
             {isSaving ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                Saving…
+                Saving...
               </>
             ) : saveSuccess ? (
               <>
@@ -1149,13 +1153,14 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
             )}
             </Button>
         </div>
-      </header>
+      </div>
 
+      <div className="min-h-[calc(100vh-280px)] flex flex-col bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
       <main className="flex-1 min-h-0 px-5 py-5 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
         <div className="mx-auto grid h-full min-h-[500px] gap-4 max-w-[1800px]" style={{ gridTemplateColumns: '300px 1fr 300px' }}>
           {/* Left Sidebar - CONTROLS - Fixed width */}
-          <section className="flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-lg min-h-[500px]">
-            <div className="px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700">
+          <section className="flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg min-h-[500px]">
+            <div className="px-4 py-3 bg-gradient-to-r gradient-primary">
               <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
@@ -1166,19 +1171,19 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <Accordion type="multiple" defaultValue={['templates', 'size', 'palette']} className="w-full space-y-3">
                 {/* Templates Section */}
-                <AccordionItem value="templates" className="border border-purple-200 rounded-lg hover:border-purple-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-purple-900 hover:bg-purple-50 rounded-t-lg">
-                    📋 Templates
+                <AccordionItem value="templates" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
+                    <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> Templates</span>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
                     <div className="space-y-3">
                       {/* Current Template */}
                       {(currentTemplateName || currentTemplateId) && (
-                        <div className="p-2 bg-purple-50 border border-purple-200 rounded-lg">
-                          <p className="text-[10px] text-purple-600 font-medium">Current Template</p>
-                          <p className="text-sm font-semibold text-purple-900">{currentTemplateName || 'Unnamed'}</p>
+                        <div className="p-2 bg-primary-50 border border-primary-200 rounded-lg">
+                          <p className="text-[10px] text-primary-600 font-medium">Current Template</p>
+                          <p className="text-sm font-semibold text-primary-900">{currentTemplateName || 'Unnamed'}</p>
                           {currentTemplateId && currentTemplateId !== 'legacy' && (
-                            <p className="text-[9px] text-purple-500 mt-0.5">ID: {currentTemplateId.slice(0, 8)}...</p>
+                            <p className="text-[9px] text-primary-500 mt-0.5">ID: {currentTemplateId.slice(0, 8)}...</p>
                           )}
                           {currentTemplateId === 'legacy' && (
                             <p className="text-[9px] text-orange-500 mt-0.5">Legacy template (stored in event)</p>
@@ -1206,7 +1211,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                                   <div className="flex items-center gap-2">
                                     <span>{template.name}</span>
                                     {template.is_default && (
-                                      <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded">Default</span>
+                                      <span className="text-[9px] bg-primary-100 text-primary-700 px-1 rounded">Default</span>
                                     )}
                                   </div>
                                 </SelectItem>
@@ -1222,7 +1227,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                           onClick={() => setShowSaveTemplateDialog(true)}
                           variant="outline"
                           size="sm"
-                          className="flex-1 h-8 text-xs border-purple-300 text-purple-700 hover:bg-purple-50"
+                          className="flex-1 h-8 text-xs border-primary-300 text-primary-700 hover:bg-primary-50"
                         >
                           <Plus className="h-3 w-3 mr-1" />
                           Save As New
@@ -1250,9 +1255,9 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="size" className="border border-purple-200 rounded-lg hover:border-purple-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-purple-900 hover:bg-purple-50 rounded-t-lg">
-                    📏 Badge Size
+                <AccordionItem value="size" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
+                    <span className="flex items-center gap-2"><CreditCard className="h-4 w-4" /> Badge Size</span>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
                     <div className="space-y-3">
@@ -1268,7 +1273,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                           </SelectTrigger>
                           <SelectContent className="max-h-[300px]">
                             <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-purple-600 uppercase">ID Card Sizes</SelectLabel>
+                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">ID Card Sizes</SelectLabel>
                               {['CR80', 'B1', 'B2', 'B3', 'B4', 'A1', 'A2', 'A3'].map((key) => {
                                 const size = BADGE_SIZES[key as keyof typeof BADGE_SIZES];
                                 return (
@@ -1279,7 +1284,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                               })}
                             </SelectGroup>
                             <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-purple-600 uppercase">Paper Sizes</SelectLabel>
+                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">Paper Sizes</SelectLabel>
                               {['A6', 'A7'].map((key) => {
                                 const size = BADGE_SIZES[key as keyof typeof BADGE_SIZES];
                                 return (
@@ -1290,7 +1295,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                               })}
                             </SelectGroup>
                             <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-purple-600 uppercase">Custom</SelectLabel>
+                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">Custom</SelectLabel>
                               <SelectItem value="custom" className="text-sm">Custom Size</SelectItem>
                             </SelectGroup>
                           </SelectContent>
@@ -1322,8 +1327,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                             }}
                             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 text-xs font-medium transition-all ${
                               height >= width
-                                ? 'border-purple-500 bg-purple-100 text-purple-900'
-                                : 'border-gray-200 text-gray-600 hover:border-purple-300 hover:bg-purple-50'
+                                ? 'border-primary-500 bg-primary-100 text-primary-900'
+                                : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:bg-primary-50'
                             }`}
                           >
                             <svg className="w-4 h-6" viewBox="0 0 16 24" fill="currentColor" opacity={0.3} stroke="currentColor" strokeWidth="1">
@@ -1352,8 +1357,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                             }}
                             className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 text-xs font-medium transition-all ${
                               width > height
-                                ? 'border-purple-500 bg-purple-100 text-purple-900'
-                                : 'border-gray-200 text-gray-600 hover:border-purple-300 hover:bg-purple-50'
+                                ? 'border-primary-500 bg-primary-100 text-primary-900'
+                                : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:bg-primary-50'
                             }`}
                           >
                             <svg className="w-6 h-4" viewBox="0 0 24 16" fill="currentColor" opacity={0.3} stroke="currentColor" strokeWidth="1">
@@ -1387,8 +1392,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                         </div>
                       )}
 
-                      <div className="text-sm text-white bg-gradient-to-r from-purple-600 to-purple-700 rounded-lg px-4 py-3 font-bold text-center shadow-md">
-                        {width.toFixed(1)}mm × {height.toFixed(1)}mm
+                      <div className="text-sm text-white bg-gradient-to-r gradient-primary rounded-lg px-4 py-3 font-bold text-center shadow-md">
+                        {width.toFixed(1)}mm x {height.toFixed(1)}mm
                         <span className="text-xs opacity-80 ml-2">
                           ({width > height ? 'Landscape' : 'Portrait'})
                         </span>
@@ -1397,33 +1402,33 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="palette" className="border border-purple-200 rounded-lg hover:border-purple-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-2 text-sm font-semibold text-purple-900 hover:bg-purple-50 rounded-t-lg">
-                    📦 Component Palette
+                <AccordionItem value="palette" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 py-2 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
+                    <span className="flex items-center gap-2"><Plus className="h-4 w-4" /> Component Palette</span>
                   </AccordionTrigger>
                   <AccordionContent className="px-3 py-3 bg-gray-50 rounded-b-lg max-h-[400px] overflow-y-auto">
                     <div className="space-y-1.5">
-                      <div className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider px-1 py-1">🎯 Basic Elements</div>
+                      <div className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider px-1 py-1">Basic Elements</div>
                       <div className="grid grid-cols-3 gap-1">
                         <PaletteItem type="eventName" label="Event Name" onAdd={handlePaletteAdd}>
-                          <Type className="h-3 w-3 text-purple-600 flex-shrink-0" />
+                          <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
                           <span className="text-xs truncate">Event</span>
                         </PaletteItem>
 
                         <PaletteItem type="qrcode" label="QR Code" onAdd={handlePaletteAdd}>
-                          <QrCode className="h-3 w-3 text-purple-600 flex-shrink-0" />
+                          <QrCode className="h-3 w-3 text-primary-600 flex-shrink-0" />
                           <span className="text-xs truncate">QR</span>
                         </PaletteItem>
 
                         <PaletteItem type="logo" label="Event Logo" onAdd={handlePaletteAdd}>
-                          <ImageIcon className="h-3 w-3 text-purple-600 flex-shrink-0" />
+                          <ImageIcon className="h-3 w-3 text-primary-600 flex-shrink-0" />
                           <span className="text-xs truncate">Logo</span>
                         </PaletteItem>
                       </div>
 
-                      <div className="border-t border-purple-200 my-2"></div>
+                      <div className="border-t border-primary-200 my-2"></div>
 
-                      <div className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider px-1 py-1">👥 Standard Fields</div>
+                      <div className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider px-1 py-1">Standard Fields</div>
                       <div className="grid grid-cols-2 gap-1">
                         {availableFields.filter(f => ['name', 'email', 'phone', 'company', 'position'].includes(f.name)).map(field => (
                           <PaletteItem
@@ -1433,7 +1438,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                             label={field.label}
                             onAdd={handlePaletteAdd}
                           >
-                            <Type className="h-3 w-3 text-purple-600 flex-shrink-0" />
+                            <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
                             <span className="text-xs truncate">{field.label}</span>
                           </PaletteItem>
                         ))}
@@ -1442,7 +1447,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                       {/* Custom Fields - only show if there are custom fields */}
                       {availableFields.filter(f => !['name', 'email', 'phone', 'company', 'position'].includes(f.name)).length > 0 && (
                         <>
-                          <div className="text-[10px] font-semibold text-green-700 uppercase tracking-wider px-1 py-1 mt-2">📝 Custom Fields</div>
+                          <div className="text-[10px] font-semibold text-green-700 uppercase tracking-wider px-1 py-1 mt-2">Custom Fields</div>
                           <div className="grid grid-cols-2 gap-1">
                             {availableFields.filter(f => !['name', 'email', 'phone', 'company', 'position'].includes(f.name)).map(field => (
                               <PaletteItem
@@ -1460,52 +1465,52 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                         </>
                       )}
 
-                      <div className="border-t border-purple-100 my-1.5"></div>
+                      <div className="border-t border-primary-100 my-1.5"></div>
 
                       <PaletteItem type="customText" label="Custom Text" onAdd={handlePaletteAdd}>
-                        <Type className="h-3 w-3 text-purple-600 flex-shrink-0" />
+                        <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
                         <span className="text-xs">Custom Text</span>
                       </PaletteItem>
                     </div>
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="background" className="border border-purple-200 rounded-lg hover:border-purple-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-purple-900 hover:bg-purple-50 rounded-t-lg">
-                    🖼️ Background
+                <AccordionItem value="background" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
+                    <span className="flex items-center gap-2"><ImageIcon className="h-4 w-4" /> Background</span>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
                     <div className="space-y-4">
                       <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-purple-700">Color</Label>
+                        <Label className="text-xs font-semibold text-primary-700">Color</Label>
                         <div className="flex gap-3">
                           <Input
                             type="color"
                             value={settings.backgroundColor}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                            className="w-12 h-10 p-1 rounded border border-purple-300"
+                            className="w-12 h-10 p-1 rounded border border-primary-300"
                           />
                           <Input
                             type="text"
                             value={settings.backgroundColor}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
                             placeholder="#ffffff"
-                            className="h-10 text-sm flex-1 border-gray-200 focus:border-purple-500"
+                            className="h-10 text-sm flex-1 border-gray-200 focus:border-primary-500"
                           />
                         </div>
                       </div>
 
                       <div className="border-t border-gray-200 pt-4">
-                        <Label className="text-xs font-semibold text-purple-700 mb-2 block">Image</Label>
+                        <Label className="text-xs font-semibold text-primary-700 mb-2 block">Image</Label>
                         <Button
                           variant="outline"
                           size="sm"
                           disabled={isUploadingBg}
-                          className="h-9 text-xs w-full border-purple-300 text-purple-700 hover:bg-purple-50 transition-all duration-200"
+                          className="h-9 text-xs w-full border-primary-300 text-primary-700 hover:bg-primary-50 transition-all duration-200"
                           onClick={() => document.getElementById('bg-file-input')?.click()}
                         >
                           <Upload className="h-3.5 w-3.5 mr-1.5" />
-                          {isUploadingBg ? 'Uploading…' : 'Upload Image'}
+                          {isUploadingBg ? 'Uploading...' : 'Upload Image'}
                         </Button>
                         <input
                           id="bg-file-input"
@@ -1530,9 +1535,9 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                   </AccordionContent>
                 </AccordionItem>
 
-                <AccordionItem value="print" className="border border-purple-200 rounded-lg hover:border-purple-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-purple-900 hover:bg-purple-50 rounded-t-lg">
-                    🖨️ Print Settings
+                <AccordionItem value="print" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
+                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
+                    <span className="flex items-center gap-2"><Printer className="h-4 w-4" /> Print Settings</span>
                   </AccordionTrigger>
                   <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg max-h-[400px] overflow-y-auto">
                     <BadgePrintSettings
@@ -1548,8 +1553,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           </section>
 
           {/* Center - Canvas Preview - Flexible but stable */}
-          <section className="min-h-[500px] flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-lg">
-            <div className="px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700 flex items-center justify-between">
+          <section className="min-h-[500px] flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg">
+            <div className="px-4 py-3 bg-gradient-to-r gradient-primary flex items-center justify-between">
               <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
@@ -1643,7 +1648,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
 
             <div 
               ref={previewContainerRef}
-              className="flex-1 flex items-center justify-center overflow-auto bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50 p-6"
+              className="flex-1 flex items-center justify-center overflow-auto bg-gradient-to-br from-slate-50 via-primary-50 to-blue-50 p-6"
             >
               {showPrintPreview ? (
                 /* Print Preview Mode - Show badge on paper */
@@ -1679,8 +1684,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                         }}
                       >
                         {/* Paper size label */}
-                        <div className="absolute -top-6 left-0 text-xs text-purple-600 font-medium">
-                          Paper: {finalPaperW.toFixed(0)}mm × {finalPaperH.toFixed(0)}mm ({printConfiguration.sizeType})
+                        <div className="absolute -top-6 left-0 text-xs text-primary-600 font-medium">
+                          Paper: {finalPaperW.toFixed(0)}mm x {finalPaperH.toFixed(0)}mm ({printConfiguration.sizeType})
                         </div>
                     
                     {/* Badge centered on paper */}
@@ -1726,10 +1731,10 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
               )}
             </div>
 
-            <div className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-700">
+            <div className="px-4 py-2.5 bg-gradient-to-r gradient-primary">
               <div className="flex items-center justify-between text-white">
                 <span className="text-xs font-semibold">
-                  Badge: {width.toFixed(1)}mm × {height.toFixed(1)}mm
+                  Badge: {width.toFixed(1)}mm x {height.toFixed(1)}mm
                 </span>
                 <div className="flex items-center gap-3">
                   {showPrintPreview && (() => {
@@ -1743,7 +1748,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
                     const finalH = printConfiguration.orientation === 'landscape' ? pW : pH;
                     return (
                       <span className="text-xs opacity-80">
-                        Paper: {finalW.toFixed(0)}mm × {finalH.toFixed(0)}mm
+                        Paper: {finalW.toFixed(0)}mm x {finalH.toFixed(0)}mm
                       </span>
                     );
                   })()}
@@ -1756,8 +1761,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           </section>
 
           {/* Right Sidebar - COMPONENT SETTINGS - Fixed width */}
-          <section className="flex flex-col overflow-hidden rounded-xl border border-purple-200 bg-white shadow-lg min-h-[500px]">
-            <div className="px-4 py-3 bg-gradient-to-r from-purple-600 to-purple-700">
+          <section className="flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg min-h-[500px]">
+            <div className="px-4 py-3 bg-gradient-to-r gradient-primary">
               <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -1778,8 +1783,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
               ) : (
                 <div className="h-full flex items-center justify-center text-center px-4">
                   <div className="space-y-4">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-purple-100 to-blue-100 flex items-center justify-center">
-                      <MousePointer2 className="h-8 w-8 text-purple-500" />
+                    <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary-100 to-blue-100 flex items-center justify-center">
+                      <MousePointer2 className="h-8 w-8 text-primary-500" />
                     </div>
                     <div>
                       <p className="text-sm text-gray-700 font-semibold">Select a component</p>
@@ -1928,6 +1933,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           </div>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }
@@ -1946,7 +1952,7 @@ function PaletteItem({ type, fieldName, label, onAdd, children }: PaletteItemPro
     <button
       type="button"
       onClick={() => onAdd(type, fieldName, label)}
-      className="w-full flex items-center gap-1.5 px-2 py-1.5 min-h-[32px] bg-gradient-to-r from-purple-50 to-transparent border border-purple-200 rounded hover:from-purple-100 hover:to-purple-50 hover:border-purple-400 hover:shadow-sm transition-all duration-200 text-left text-xs font-medium text-purple-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 active:scale-[0.98]"
+      className="w-full flex items-center gap-1.5 px-2 py-1.5 min-h-[32px] bg-gradient-to-r from-primary-50 to-transparent border border-primary-200 rounded hover:from-primary-100 hover:to-primary-50 hover:border-primary-400 hover:shadow-sm transition-all duration-200 text-left text-xs font-medium text-primary-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 active:scale-[0.98]"
     >
       {children}
     </button>
@@ -2265,7 +2271,7 @@ function CanvasComponentItem({
         top: `${component.y}%`,
         cursor: isDragging ? 'grabbing' : 'grab'
       }}
-      className={`${isSelected ? 'ring-2 ring-purple-500 ring-offset-2 shadow-lg' : 'hover:ring-1 hover:ring-purple-300'}`}
+      className={`${isSelected ? 'ring-2 ring-primary-500 ring-offset-2 shadow-lg' : 'hover:ring-1 hover:ring-primary-300'}`}
       handleClasses={{
         top: 'resize-handle',
         right: 'resize-handle',
@@ -2289,7 +2295,7 @@ function CanvasComponentItem({
       >
         {renderContent()}
         {isSelected && (
-          <div className="absolute -top-7 left-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white px-3 py-1 rounded-md text-xs whitespace-nowrap pointer-events-none shadow-md font-medium">
+          <div className="absolute -top-7 left-0 bg-gradient-to-r from-primary-600 to-blue-600 text-white px-3 py-1 rounded-md text-xs whitespace-nowrap pointer-events-none shadow-md font-medium">
             {component.label || component.type}
           </div>
         )}
@@ -2323,7 +2329,7 @@ function ComponentStylingPanel({
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b bg-gradient-to-r from-purple-50 to-blue-50 px-4 py-3">
+      <div className="flex items-center justify-between border-b bg-gradient-to-r from-primary-50 to-blue-50 px-4 py-3">
         <h3 className="text-sm font-semibold text-slate-700">Component Settings</h3>
         <TooltipProvider>
           <Tooltip>
@@ -2346,7 +2352,7 @@ function ComponentStylingPanel({
       <div className="px-4 py-4 space-y-4">
         <div className="space-y-1">
           <Label className="text-xs text-slate-500 uppercase tracking-wide">Component Type</Label>
-          <p className="text-sm font-semibold text-purple-700">{component.label || component.type}</p>
+          <p className="text-sm font-semibold text-primary-700">{component.label || component.type}</p>
         </div>
 
         <Accordion type="multiple" defaultValue={accordionDefaults} className="flex flex-col gap-3">
@@ -2421,7 +2427,7 @@ function ComponentStylingPanel({
                           fontWeight: component.fontWeight === 'bold' ? 'normal' : 'bold'
                         })
                       }
-                      className={`h-10 flex-1 transition-all duration-200 ${component.fontWeight === 'bold' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                      className={`h-10 flex-1 transition-all duration-200 ${component.fontWeight === 'bold' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
                     >
                       <Bold className="h-4 w-4" />
                     </Button>
@@ -2433,7 +2439,7 @@ function ComponentStylingPanel({
                           fontStyle: component.fontStyle === 'italic' ? 'normal' : 'italic'
                         })
                       }
-                      className={`h-10 flex-1 transition-all duration-200 ${component.fontStyle === 'italic' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                      className={`h-10 flex-1 transition-all duration-200 ${component.fontStyle === 'italic' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
                     >
                       <Italic className="h-4 w-4" />
                     </Button>
@@ -2447,7 +2453,7 @@ function ComponentStylingPanel({
                       variant={component.textAlign === 'left' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => onUpdate({ textAlign: 'left' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'left' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'left' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
                     >
                       <AlignLeft className="h-4 w-4" />
                     </Button>
@@ -2455,7 +2461,7 @@ function ComponentStylingPanel({
                       variant={component.textAlign === 'center' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => onUpdate({ textAlign: 'center' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'center' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'center' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
                     >
                       <AlignCenter className="h-4 w-4" />
                     </Button>
@@ -2463,7 +2469,7 @@ function ComponentStylingPanel({
                       variant={component.textAlign === 'right' ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => onUpdate({ textAlign: 'right' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'right' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : ''}`}
+                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'right' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
                     >
                       <AlignRight className="h-4 w-4" />
                     </Button>

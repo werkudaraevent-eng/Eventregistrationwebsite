@@ -217,35 +217,35 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
     switch (log.status) {
       case 'sent':
         return (
-          <Badge className="bg-green-100 text-green-800 border-green-200">
+          <Badge className="bg-success-light text-success border-success/20">
             <CheckCircle2 className="h-3 w-3 mr-1" />
             Sent
           </Badge>
         );
       case 'opened':
         return (
-          <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+          <Badge className="bg-info-light text-info border-info/20">
             <Eye className="h-3 w-3 mr-1" />
             Opened
           </Badge>
         );
       case 'clicked':
         return (
-          <Badge className="bg-purple-100 text-purple-800 border-purple-200">
+          <Badge className="bg-primary-100 text-primary-800 border-primary-200">
             <MousePointerClick className="h-3 w-3 mr-1" />
             Clicked
           </Badge>
         );
       case 'failed':
         return (
-          <Badge className="bg-red-100 text-red-800 border-red-200">
+          <Badge className="bg-error-light text-error border-error/20">
             <XCircle className="h-3 w-3 mr-1" />
             Failed
           </Badge>
         );
       case 'pending':
         return (
-          <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">
+          <Badge className="bg-warning-light text-warning border-warning/20">
             <Clock className="h-3 w-3 mr-1" />
             Pending
           </Badge>
@@ -258,13 +258,13 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
   const getTypeBadge = (type: EmailLog['email_type']) => {
     switch (type) {
       case 'blast':
-        return <Badge variant="outline" className="bg-purple-50">Blast Campaign</Badge>;
+        return <Badge variant="outline" className="bg-primary-50">Blast Campaign</Badge>;
       case 'test':
-        return <Badge variant="outline" className="bg-orange-50">Test Email</Badge>;
+        return <Badge variant="outline" className="bg-warning-light">Test Email</Badge>;
       case 'confirmation':
-        return <Badge variant="outline" className="bg-green-50">Confirmation</Badge>;
+        return <Badge variant="outline" className="bg-success-light">Confirmation</Badge>;
       case 'individual':
-        return <Badge variant="outline" className="bg-blue-50">Individual</Badge>;
+        return <Badge variant="outline" className="bg-info-light">Individual</Badge>;
     }
   };
 
@@ -325,11 +325,16 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Email History</h2>
-          <p className="text-muted-foreground">
-            Track all email communications sent to participants
-          </p>
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Mail className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Email History</h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Track all email communications sent to participants
+            </p>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={loadEmailHistory} disabled={isLoading}>
@@ -354,27 +359,27 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
             <div className="border-l h-10"></div>
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Sent</div>
-              <div className="text-lg font-bold text-green-600">{stats.sent}</div>
+              <div className="text-lg font-bold text-success">{stats.sent}</div>
             </div>
             <div className="border-l h-10"></div>
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Opened</div>
-              <div className="text-lg font-bold text-blue-600">{stats.opened}</div>
+              <div className="text-lg font-bold text-info">{stats.opened}</div>
             </div>
             <div className="border-l h-10"></div>
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Clicked</div>
-              <div className="text-lg font-bold text-purple-600">{stats.clicked}</div>
+              <div className="text-lg font-bold text-primary-600">{stats.clicked}</div>
             </div>
             <div className="border-l h-10"></div>
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Failed</div>
-              <div className="text-lg font-bold text-red-600">{stats.failed}</div>
+              <div className="text-lg font-bold text-error">{stats.failed}</div>
             </div>
             <div className="border-l h-10"></div>
             <div className="text-center">
               <div className="text-xs text-muted-foreground mb-0.5">Pending</div>
-              <div className="text-lg font-bold text-yellow-600">{stats.pending}</div>
+              <div className="text-lg font-bold text-warning">{stats.pending}</div>
             </div>
           </div>
         </CardContent>
@@ -529,7 +534,7 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
                         <div className="space-y-1">
                           {getStatusBadge(log)}
                           {log.status === 'failed' && log.error_message && (
-                            <div className="flex items-start gap-1 text-xs text-red-600 mt-1">
+                            <div className="flex items-start gap-1 text-xs text-error mt-1">
                               <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
                               <span className="line-clamp-2">{log.error_message}</span>
                             </div>
@@ -539,7 +544,7 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
                       <TableCell>
                         <div className="space-y-1 text-xs">
                           {log.opened_at ? (
-                            <div className="flex items-center gap-1 text-blue-600">
+                            <div className="flex items-center gap-1 text-info">
                               <Eye className="h-3 w-3" />
                               <span>{formatDateTime(log.opened_at)}</span>
                             </div>
@@ -549,7 +554,7 @@ export function EmailHistory({ eventId }: EmailHistoryProps) {
                             </div>
                           ) : null}
                           {log.clicked_at && (
-                            <div className="flex items-center gap-1 text-purple-600">
+                            <div className="flex items-center gap-1 text-primary-600">
                               <MousePointerClick className="h-3 w-3" />
                               <span>{formatDateTime(log.clicked_at)}</span>
                             </div>

@@ -64,7 +64,7 @@ export function PaperSizeSelector({ configuration, onConfigurationChange }: Pape
           <SelectContent className="max-h-[300px]">
             {Object.entries(SIZE_GROUPS).map(([groupName, sizes]) => (
               <SelectGroup key={groupName}>
-                <SelectLabel className="text-[10px] font-semibold text-purple-600 uppercase tracking-wider">
+                <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase tracking-wider">
                   {groupName}
                 </SelectLabel>
                 {sizes.map((key) => {

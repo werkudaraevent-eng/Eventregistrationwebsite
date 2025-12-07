@@ -3,10 +3,10 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Card, CardContent } from './ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
-import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, RefreshCw, Download, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Calendar, Clock, Loader2, MapPin, Plus, Trash2, Users, MoreVertical, LogIn, Edit, Download, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 
 interface AgendaItem {
@@ -416,8 +416,8 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
       return <ArrowUpDown className="h-3 w-3 opacity-30" />;
     }
     return sortConfig.direction === 'asc' 
-      ? <ArrowUp className="h-3 w-3 text-purple-600" />
-      : <ArrowDown className="h-3 w-3 text-purple-600" />;
+      ? <ArrowUp className="h-3 w-3 text-primary-600" />
+      : <ArrowDown className="h-3 w-3 text-primary-600" />;
   };
 
   if (isLoading) {
@@ -429,44 +429,33 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
   }
 
   return (
-    <Card className="border-0 shadow-xl bg-white">
-      <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-purple-50 to-pink-50">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-3 text-2xl">
-              <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-md shadow-purple-500/30">
-                <Calendar className="h-5 w-5 text-white" />
-              </div>
-              Event Agenda
-            </CardTitle>
-            <CardDescription className="flex items-center gap-3 mt-2 text-base">
-              <span>Manage event schedule and sessions</span>
-              <span className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                Auto-sync • Updated {lastUpdated.toLocaleTimeString()}
-              </span>
-            </CardDescription>
+    <div className="space-y-6">
+      {/* Header - Outside Card */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Calendar className="h-6 w-6 text-white" />
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="border-gray-300 hover:border-gray-400"
-              size="sm"
-              onClick={() => {
-                fetchAgenda();
-                fetchParticipants();
-              }}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Refresh
-            </Button>
-            <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
-              <DialogTrigger asChild>
-                <Button className="gradient-primary hover:opacity-90 shadow-md shadow-purple-500/30">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Session
-                </Button>
-              </DialogTrigger>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Event Agenda</h2>
+            <p className="text-sm text-gray-600 mt-1 flex items-center gap-4">
+              <span>Manage event schedule and sessions</span>
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                <span>Auto-sync • Updated {lastUpdated.toLocaleTimeString()}</span>
+              </span>
+            </p>
+          </div>
+        </div>
+        <Button onClick={() => setIsDialogOpen(true)} className="gradient-primary hover:opacity-90 text-white shadow-primary">
+          <Plus className="mr-2 h-4 w-4" />
+          Add Session
+        </Button>
+      </div>
+
+    <Card className="border-0 shadow-xl bg-white">
+      {/* Add/Edit Session Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={handleDialogChange}>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>{editingAgenda ? 'Edit Agenda Item' : 'Create Agenda Item'}</DialogTitle>
@@ -543,9 +532,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                 </form>
               </DialogContent>
             </Dialog>
-          </div>
-        </div>
-      </CardHeader>
+
       <CardContent className="overflow-visible">
         {agendaItems.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
@@ -706,7 +693,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
         {/* Participants List Dialog */}
         <Dialog open={!!selectedAgendaForParticipants} onOpenChange={(open: boolean) => !open && setSelectedAgendaForParticipants(null)}>
           <DialogContent className="flex flex-col p-0" style={{ width: '90vw', maxWidth: '90vw', height: '90vh', maxHeight: '90vh' }}>
-            <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-purple-50 to-blue-50 flex-shrink-0">
+            <DialogHeader className="px-6 py-4 border-b bg-gradient-to-r from-primary-50 to-blue-50 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <div>
                   <DialogTitle className="text-xl">Participants for: {selectedAgendaForParticipants}</DialogTitle>
@@ -750,7 +737,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                     link.click();
                     document.body.removeChild(link);
                   }}
-                  className="inline-flex items-center gap-2 px-4 py-2 gradient-primary text-white rounded-lg hover:opacity-90 transition-opacity shadow-md shadow-purple-500/30"
+                  className="inline-flex items-center gap-2 px-4 py-2 gradient-primary text-white rounded-lg hover:opacity-90 transition-opacity shadow-md shadow-primary/30"
                 >
                   <Download className="h-4 w-4" />
                   Export CSV
@@ -779,7 +766,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                       <p className="text-lg">No participants found matching "{searchTerm}"</p>
                       <button
                         onClick={() => setSearchTerm('')}
-                        className="mt-4 text-purple-600 hover:text-purple-700 underline"
+                        className="mt-4 text-primary-600 hover:text-primary-700 underline"
                       >
                         Clear search
                       </button>
@@ -800,7 +787,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                     <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'white', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }} className="border-b">
                       <tr className="hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors">
                         <th 
-                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-primary-50 transition-colors" 
                           style={{ minWidth: '180px' }}
                           onClick={() => handleSort('name')}
                         >
@@ -810,7 +797,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                           </div>
                         </th>
                         <th 
-                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-primary-50 transition-colors" 
                           style={{ minWidth: '220px' }}
                           onClick={() => handleSort('email')}
                         >
@@ -820,7 +807,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                           </div>
                         </th>
                         <th 
-                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-primary-50 transition-colors" 
                           style={{ minWidth: '180px' }}
                           onClick={() => handleSort('company')}
                         >
@@ -830,7 +817,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                           </div>
                         </th>
                         <th 
-                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-primary-50 transition-colors" 
                           style={{ minWidth: '150px' }}
                           onClick={() => handleSort('position')}
                         >
@@ -840,7 +827,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
                           </div>
                         </th>
                         <th 
-                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-purple-50 transition-colors" 
+                          className="text-foreground h-10 px-4 text-left align-middle font-medium whitespace-nowrap cursor-pointer hover:bg-primary-50 transition-colors" 
                           style={{ minWidth: '180px' }}
                           onClick={() => handleSort('checkInTime')}
                         >
@@ -969,5 +956,6 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
         </Dialog>
       </CardContent>
     </Card>
+    </div>
   );
 }

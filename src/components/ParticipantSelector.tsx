@@ -128,12 +128,12 @@ export default function ParticipantSelector({ eventId, selectedIds: initialSelec
 
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) {
-      return <ArrowUpDown className="h-3 w-3 ml-1 text-gray-400" />;
+      return <ArrowUpDown className="h-3 w-3 ml-1 text-neutral-400" />;
     }
     if (sortDirection === 'asc') {
-      return <ArrowUp className="h-3 w-3 ml-1 text-purple-600" />;
+      return <ArrowUp className="h-3 w-3 ml-1 text-primary-600" />;
     }
-    return <ArrowDown className="h-3 w-3 ml-1 text-purple-600" />;
+    return <ArrowDown className="h-3 w-3 ml-1 text-primary-600" />;
   };
 
   const toggleParticipant = (id: string) => {
@@ -157,8 +157,8 @@ export default function ParticipantSelector({ eventId, selectedIds: initialSelec
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 space-y-4">
-        <RefreshCw className="h-8 w-8 animate-spin text-purple-600" />
-        <p className="text-gray-600">Loading participants...</p>
+        <RefreshCw className="h-8 w-8 animate-spin text-primary-600" />
+        <p className="text-neutral-600">Loading participants...</p>
       </div>
     );
   }

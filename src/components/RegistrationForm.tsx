@@ -64,7 +64,7 @@ export function RegistrationForm() {
       <Card className="w-full max-w-2xl mx-auto">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <CheckCircle2 className="h-16 w-16 text-green-500" />
+            <CheckCircle2 className="h-16 w-16 text-success" />
           </div>
           <CardTitle>Registration Successful!</CardTitle>
           <CardDescription>
@@ -171,7 +171,7 @@ export function RegistrationForm() {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded">
+            <div className="alert-error px-4 py-3 rounded">
               {error}
             </div>
           )}

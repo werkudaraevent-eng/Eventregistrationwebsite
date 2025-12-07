@@ -8,7 +8,8 @@ import { EmailTemplates } from './EmailTemplates';
 import BlastCampaigns from './BlastCampaigns';
 import { EmailConfigurationV2 } from './EmailConfigurationV2';
 import { EmailHistory } from './EmailHistory';
-import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History, CreditCard } from 'lucide-react';
+import SeatingManagement from './SeatingManagement';
+import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History, CreditCard, LayoutGrid } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 import { BadgeDesigner } from './BadgeDesigner';
 
@@ -37,7 +38,7 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab');
-    if (tabParam && ['participants', 'agenda', 'branding', 'badge-design', 'emails', 'blast', 'email-config', 'email-history'].includes(tabParam)) {
+    if (tabParam && ['participants', 'agenda', 'branding', 'badge-design', 'seating', 'emails', 'blast', 'email-config', 'email-history'].includes(tabParam)) {
       setActiveTab(tabParam);
     }
   }, []);
@@ -84,17 +85,17 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-sky-50 to-cyan-50">
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-6 py-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Button onClick={handleBackToEvents} variant="ghost" size="sm" className="hover:bg-purple-100 hover:text-purple-700">
+              <Button onClick={handleBackToEvents} variant="ghost" size="sm" className="hover:bg-primary-100 hover:text-primary-700">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Events
               </Button>
               <div className="border-l border-gray-300 pl-4">
-                <h1 className="text-2xl bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">{event?.name || 'Event Management Dashboard'}</h1>
+                <h1 className="text-2xl font-bold text-primary-700">{event?.name || 'Event Management Dashboard'}</h1>
                 <p className="text-sm text-gray-600 mt-1">
                   Manage registrations, attendance, and event schedule
                 </p>
@@ -110,38 +111,42 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
       <main className="container mx-auto px-6 py-8">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-8">
-          <TabsList className="flex w-full max-w-5xl mx-auto gap-2 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 h-14">
-            <TabsTrigger value="participants" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Participants</span>
+          <TabsList className="flex flex-wrap justify-center w-full max-w-5xl mx-auto gap-1.5 bg-white/80 backdrop-blur-sm p-2 rounded-2xl shadow-md border border-gray-200 overflow-x-auto">
+            <TabsTrigger value="participants" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Users className="h-4 w-4 flex-shrink-0" />
+              <span>Participants</span>
             </TabsTrigger>
-            <TabsTrigger value="agenda" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Calendar className="h-4 w-4" />
-              <span className="hidden sm:inline">Agenda</span>
+            <TabsTrigger value="agenda" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Calendar className="h-4 w-4 flex-shrink-0" />
+              <span>Agenda</span>
             </TabsTrigger>
-            <TabsTrigger value="branding" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Palette className="h-4 w-4" />
-              <span className="hidden sm:inline">Branding</span>
+            <TabsTrigger value="branding" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Palette className="h-4 w-4 flex-shrink-0" />
+              <span>Branding</span>
             </TabsTrigger>
-            <TabsTrigger value="badge-design" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <CreditCard className="h-4 w-4" />
-              <span className="hidden sm:inline">Badge Design</span>
+            <TabsTrigger value="badge-design" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <CreditCard className="h-4 w-4 flex-shrink-0" />
+              <span>Badge</span>
             </TabsTrigger>
-            <TabsTrigger value="emails" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Mail className="h-4 w-4" />
-              <span className="hidden sm:inline">Templates</span>
+            <TabsTrigger value="seating" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <LayoutGrid className="h-4 w-4 flex-shrink-0" />
+              <span>Seating</span>
             </TabsTrigger>
-            <TabsTrigger value="blast" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Send className="h-4 w-4" />
-              <span className="hidden sm:inline">Blast</span>
+            <TabsTrigger value="emails" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Mail className="h-4 w-4 flex-shrink-0" />
+              <span>Templates</span>
             </TabsTrigger>
-            <TabsTrigger value="email-config" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <Settings className="h-4 w-4" />
-              <span className="hidden sm:inline">Email Settings</span>
+            <TabsTrigger value="blast" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Send className="h-4 w-4 flex-shrink-0" />
+              <span>Blast</span>
             </TabsTrigger>
-            <TabsTrigger value="email-history" className="flex items-center gap-2 rounded-xl data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-600 data-[state=active]:to-pink-600 data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-purple-500/30 transition-all duration-300">
-              <History className="h-4 w-4" />
-              <span className="hidden sm:inline">Email History</span>
+            <TabsTrigger value="email-config" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <Settings className="h-4 w-4 flex-shrink-0" />
+              <span>Settings</span>
+            </TabsTrigger>
+            <TabsTrigger value="email-history" className="flex items-center gap-1.5 rounded-xl tab-active-gradient transition-all duration-300 text-xs px-3 py-2 whitespace-nowrap">
+              <History className="h-4 w-4 flex-shrink-0" />
+              <span>History</span>
             </TabsTrigger>
           </TabsList>
 
@@ -159,6 +164,10 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
 
           <TabsContent value="badge-design">
             <BadgeDesigner eventId={eventId} />
+          </TabsContent>
+
+          <TabsContent value="seating">
+            <SeatingManagement eventId={eventId} />
           </TabsContent>
 
           <TabsContent value="emails">

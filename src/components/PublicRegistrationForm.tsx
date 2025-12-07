@@ -16,9 +16,9 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
-import { AlertCircle, CheckCircle2, Calendar, MapPin, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { supabase } from '../utils/supabase/client';
 import type { Event, BrandingSettings, ColumnVisibility } from '../utils/localDBStub';
 import { createParticipant } from '../utils/supabaseDataLayer';
@@ -37,6 +37,11 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     attendance: true,
     registered: true
   });
+  const [fieldRequirements, setFieldRequirements] = useState<{
+    phone?: boolean;
+    company?: boolean;
+    position?: boolean;
+  }>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -106,12 +111,17 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
         registered: true
       };
       setColumnVisibility(visibility);
+
+      // Load field requirements (stored inside branding object)
+      const requirements = (brandingSettings as any).fieldRequirements || {};
+      setFieldRequirements(requirements);
       
       console.log('[REGISTRATION] Loaded event:', loadedEvent.name);
       console.log('[REGISTRATION] Branding settings:', brandingSettings);
       console.log('[REGISTRATION] Email auto-send enabled?', brandingSettings.autoSendConfirmation);
       console.log('[REGISTRATION] Template ID:', brandingSettings.confirmationTemplateId);
       console.log('[REGISTRATION] Column visibility:', visibility);
+      console.log('[REGISTRATION] Field requirements:', requirements);
       
       setIsLoading(false);
     } catch (err) {
@@ -165,6 +175,22 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(formData.email)) {
       setError('Please enter a valid email address');
+      return false;
+    }
+
+    // Validate built-in required fields based on fieldRequirements
+    if (fieldRequirements.phone && columnVisibility.phone && !formData.phone.trim()) {
+      setError('Please enter your phone number');
+      return false;
+    }
+    
+    if (fieldRequirements.company && columnVisibility.company && !formData.company.trim()) {
+      setError('Please enter your company');
+      return false;
+    }
+    
+    if (fieldRequirements.position && columnVisibility.position && !formData.position.trim()) {
+      setError('Please enter your position');
       return false;
     }
     
@@ -469,9 +495,18 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
             branding?.formWidth === 'wide' ? '800px' : '600px'
         }}
       >
-        {/* Event Header */}
-        <Card className="mb-6 backdrop-blur-md bg-white/60 shadow-xl border border-white/20">
-          <CardHeader className="text-center">
+        {/* Single Card - Microsoft Forms Style */}
+        <Card 
+          className="backdrop-blur-md bg-white/60 shadow-xl border border-white/20"
+          style={{
+            borderRadius: 
+              branding?.borderRadius === 'none' ? '0' :
+              branding?.borderRadius === 'small' ? '4px' :
+              branding?.borderRadius === 'large' ? '12px' : '8px'
+          }}
+        >
+          {/* Header Section - Same as Live Preview */}
+          <CardHeader className="text-center pb-6">
             {/* Logo */}
             {branding?.logoUrl && (
               <div className={`flex ${getLogoAlignmentClass()} mb-4`}>
@@ -482,102 +517,64 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 />
               </div>
             )}
-            
-            {/* Custom Header Text */}
+
+            {/* Custom Header */}
             {branding?.customHeader && (
               <p 
-                className="text-lg mb-4 font-medium"
-                style={{ color: branding.primaryColor }}
+                className="font-semibold text-base mb-4"
+                style={{ color: branding.primaryColor || '#7C3AED' }}
               >
                 {branding.customHeader}
               </p>
             )}
             
-            <CardTitle className="text-4xl font-bold mb-6">{event?.name}</CardTitle>
+            {/* Event Title */}
+            <CardTitle 
+              className="text-2xl font-bold mb-4"
+              style={{ color: branding?.fontColor || '#1F2937' }}
+            >
+              {event?.name}
+            </CardTitle>
             
-            {/* Date and Location - Modern Style */}
+            {/* Date & Location Badges - Same as Live Preview */}
             {((branding?.showDate !== false && event?.startDate) || (branding?.showLocation !== false && event?.location)) && (
-              <div className="flex flex-wrap items-center justify-center gap-3 mt-6 mb-6">
+              <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
                 {branding?.showDate !== false && event?.startDate && (
                   <div 
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full backdrop-blur-sm shadow-sm"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
                     style={{ 
                       backgroundColor: branding?.primaryColor ? `${branding.primaryColor}15` : 'rgba(124, 58, 237, 0.1)',
-                      border: `1px solid ${branding?.primaryColor ? `${branding.primaryColor}30` : 'rgba(124, 58, 237, 0.2)'}`
+                      color: branding?.primaryColor || '#7C3AED'
                     }}
                   >
-                    <Calendar 
-                      className="h-4 w-4" 
-                      style={{ color: branding?.primaryColor || '#7C3AED' }}
-                    />
-                    <span 
-                      className="text-sm font-medium"
-                      style={{ color: branding?.primaryColor || '#7C3AED' }}
-                    >
-                      {new Date(event.startDate).toLocaleDateString('id-ID', { 
-                        day: '2-digit', 
-                        month: 'short', 
-                        year: 'numeric' 
-                      })}
-                    </span>
+                    📅 {new Date(event.startDate).toLocaleDateString('en-US', { 
+                      month: 'short',
+                      day: 'numeric', 
+                      year: 'numeric' 
+                    })}
                   </div>
                 )}
                 {branding?.showLocation !== false && event?.location && (
                   <div 
-                    className="inline-flex items-center gap-3 px-6 py-3 rounded-full backdrop-blur-md shadow-lg hover:shadow-xl transition-shadow duration-300"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
                     style={{ 
-                      backgroundColor: branding?.primaryColor ? `${branding.primaryColor}12` : 'rgba(124, 58, 237, 0.08)',
-                      border: `2px solid ${branding?.primaryColor ? `${branding.primaryColor}40` : 'rgba(124, 58, 237, 0.3)'}`
+                      backgroundColor: branding?.primaryColor ? `${branding.primaryColor}15` : 'rgba(124, 58, 237, 0.1)',
+                      color: branding?.primaryColor || '#7C3AED'
                     }}
                   >
-                    <div 
-                      className="p-2 rounded-full"
-                      style={{ 
-                        backgroundColor: branding?.primaryColor ? `${branding.primaryColor}20` : 'rgba(124, 58, 237, 0.15)'
-                      }}
-                    >
-                      <MapPin 
-                        className="h-5 w-5" 
-                        style={{ 
-                          color: branding?.primaryColor || '#7C3AED',
-                          strokeWidth: 2.5
-                        }}
-                      />
-                    </div>
-                    <span 
-                      className="text-base font-semibold tracking-wide"
-                      style={{ 
-                        color: branding?.primaryColor || '#7C3AED',
-                        letterSpacing: '0.02em'
-                      }}
-                    >
-                      {event.location}
-                    </span>
+                    📍 {event.location}
                   </div>
                 )}
               </div>
             )}
             
+            {/* Description */}
             {branding?.showDescription !== false && event?.description && (
-              <p className="text-sm text-muted-foreground mt-2 mb-4 max-w-2xl mx-auto">{event.description}</p>
+              <p className="text-sm text-gray-500">{event.description}</p>
             )}
           </CardHeader>
-        </Card>
-
-        {/* Registration Form */}
-        <Card 
-          className="backdrop-blur-md bg-white/60 shadow-xl border border-white/20"
-          style={{
-            borderRadius: 
-              branding?.borderRadius === 'none' ? '0' :
-              branding?.borderRadius === 'small' ? '4px' :
-              branding?.borderRadius === 'large' ? '12px' : '8px'
-          }}
-        >
-          <CardHeader>
-            <CardTitle>Register Now</CardTitle>
-            <CardDescription>Please fill out the form below to register</CardDescription>
-          </CardHeader>
+          
+          {/* Form Section */}
           <CardContent>
             <style>{`
               /* Microsoft Forms-style transparent inputs */
@@ -622,13 +619,6 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 color: ${branding?.fontColor || '#1F2937'};
                 margin-bottom: 4px;
               }
-              
-              .registration-form label:has(+ input[required])::after,
-              .registration-form label:has(+ textarea[required])::after,
-              .registration-form label:has(+ select[required])::after {
-                content: ' *';
-                color: ${branding?.primaryColor || '#dc2626'};
-              }
             `}</style>
             <form onSubmit={handleSubmit} className="space-y-6 registration-form">
               {/* Required Fields */}
@@ -636,7 +626,9 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 <h3 className="font-semibold text-sm text-muted-foreground">BASIC INFORMATION</h3>
                 
                 <div>
-                  <Label htmlFor="name">Full Name</Label>
+                  <Label htmlFor="name">
+                    Full Name <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="name"
                     value={formData.name}
@@ -647,7 +639,9 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 </div>
 
                 <div>
-                  <Label htmlFor="email">Email Address</Label>
+                  <Label htmlFor="email">
+                    Email Address <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="email"
                     type="email"
@@ -661,13 +655,16 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 {/* Phone Number - Conditionally rendered */}
                 {columnVisibility.phone && (
                   <div>
-                    <Label htmlFor="phone">Phone Number</Label>
+                    <Label htmlFor="phone">
+                      Phone Number {fieldRequirements.phone && <span className="text-red-500">*</span>}
+                    </Label>
                     <Input
                       id="phone"
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => handleInputChange('phone', e.target.value)}
                       placeholder="+1 (555) 000-0000"
+                      required={fieldRequirements.phone}
                     />
                   </div>
                 )}
@@ -675,12 +672,15 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 {/* Company - Conditionally rendered */}
                 {columnVisibility.company && (
                   <div>
-                    <Label htmlFor="company">Company</Label>
+                    <Label htmlFor="company">
+                      Company {fieldRequirements.company && <span className="text-red-500">*</span>}
+                    </Label>
                     <Input
                       id="company"
                       value={formData.company}
                       onChange={(e) => handleInputChange('company', e.target.value)}
                       placeholder="Your company name"
+                      required={fieldRequirements.company}
                     />
                   </div>
                 )}
@@ -688,12 +688,15 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                 {/* Position - Conditionally rendered */}
                 {columnVisibility.position && (
                   <div>
-                    <Label htmlFor="position">Position/Title</Label>
+                    <Label htmlFor="position">
+                      Position/Title {fieldRequirements.position && <span className="text-red-500">*</span>}
+                    </Label>
                     <Input
                       id="position"
                       value={formData.position}
                       onChange={(e) => handleInputChange('position', e.target.value)}
                       placeholder="Your job title"
+                      required={fieldRequirements.position}
                     />
                   </div>
                 )}
@@ -707,7 +710,7 @@ export function PublicRegistrationForm({ eventId }: PublicRegistrationFormProps)
                   {sortedCustomFields.map(field => (
                     <div key={field.id}>
                       <Label htmlFor={field.id}>
-                        {field.label} {field.required && '*'}
+                        {field.label} {field.required && <span className="text-red-500">*</span>}
                       </Label>
                       
                       {field.type === 'textarea' ? (

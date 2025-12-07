@@ -231,9 +231,14 @@ export function EmailConfiguration() {
 
   return (
     <div className="space-y-6">
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold">Email Configuration</h2>
-        <p className="text-muted-foreground">Configure your email service provider</p>
+      <div className="flex items-center gap-4 mb-6">
+        <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+          <Settings className="h-6 w-6 text-white" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Email Configuration</h2>
+          <p className="text-sm text-gray-600 mt-1">Configure your email service provider</p>
+        </div>
       </div>
 
       {message && (
@@ -288,7 +293,7 @@ export function EmailConfiguration() {
                 saveConfig();
               }} 
               disabled={saving} 
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg"
+              className="gradient-primary hover:opacity-90 text-white shadow-lg"
             >
               {saving ? 'Saving...' : '💾 Save General Settings'}
             </Button>
@@ -529,7 +534,7 @@ export function EmailConfiguration() {
               }} 
               disabled={saving} 
               size="lg" 
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg"
+              className="gradient-primary hover:opacity-90 text-white shadow-lg"
             >
               {saving ? 'Saving...' : '🔧 Save Provider Settings'}
             </Button>

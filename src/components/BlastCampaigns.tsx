@@ -105,7 +105,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         .eq('eventId', eventId);
 
       // Apply target filtering
-      if ((campaign.target_type === 'selected' || campaign.target_type === 'manual') && campaign.target_participant_ids?.length) {
+      if (campaign.target_type === 'manual' && campaign.target_participant_ids?.length) {
         participantsQuery = participantsQuery.in('id', campaign.target_participant_ids);
       } else if (campaign.target_type === 'filtered' && campaign.target_filter) {
         // Apply custom filters if needed (simplified version)
@@ -382,7 +382,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
 
   const getChannelBadge = (channel: 'email' | 'whatsapp') => {
     return channel === 'email' ? (
-      <Badge variant="outline" className="bg-purple-50">
+      <Badge variant="outline" className="bg-primary-50">
         <Mail className="h-3 w-3 mr-1" />
         Email
       </Badge>
@@ -513,7 +513,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
         .eq('eventId', eventId);
 
       // Apply target filtering
-      if ((campaign.target_type === 'selected' || campaign.target_type === 'manual') && campaign.target_participant_ids?.length) {
+      if (campaign.target_type === 'manual' && campaign.target_participant_ids?.length) {
         console.log('[ViewParticipants] Filtering by selected IDs:', campaign.target_participant_ids);
         participantsQuery = participantsQuery.in('id', campaign.target_participant_ids);
       } else if (campaign.target_type === 'filtered' && campaign.target_filter) {
@@ -614,14 +614,17 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-            Blast Campaigns
-          </h2>
-          <p className="text-gray-600 mt-1">Create and manage email and WhatsApp campaigns</p>
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Send className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Blast Campaigns</h2>
+            <p className="text-sm text-gray-600 mt-1">Create and manage email and WhatsApp campaigns</p>
+          </div>
         </div>
-        <Button onClick={() => setShowCreateWizard(true)} size="lg">
-          <Plus className="h-5 w-5 mr-2" />
+        <Button onClick={() => setShowCreateWizard(true)} className="gradient-primary hover:opacity-90 text-white shadow-primary">
+          <Plus className="h-4 w-4 mr-2" />
           Create Campaign
         </Button>
       </div>
@@ -664,7 +667,7 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
             <CardTitle className="text-sm font-medium text-gray-600">Success Rate</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-purple-600">
+            <div className="text-2xl font-bold text-primary-600">
               {campaigns.length > 0
                 ? Math.round(
                     (campaigns.reduce((sum, c) => sum + c.sent_count, 0) /
@@ -969,8 +972,8 @@ export default function BlastCampaigns({ eventId }: BlastCampaignsProps) {
                     <div className="text-3xl font-bold text-red-600">{selectedCampaign.failed_count}</div>
                     <div className="text-sm text-gray-600">Failed</div>
                   </div>
-                  <div className="flex items-center gap-3 px-6 py-3 bg-purple-50 rounded-lg">
-                    <div className="text-3xl font-bold text-purple-600">{selectedCampaign.total_recipients}</div>
+                  <div className="flex items-center gap-3 px-6 py-3 bg-primary-50 rounded-lg">
+                    <div className="text-3xl font-bold text-primary-600">{selectedCampaign.total_recipients}</div>
                     <div className="text-sm text-gray-600">Total</div>
                   </div>
                 </div>

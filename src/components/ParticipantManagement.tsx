@@ -3,8 +3,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { TableBody, TableCell, TableHead, TableRow } from './ui/table';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
+import { Card, CardContent, CardHeader } from './ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, Filter, X, Printer } from 'lucide-react';
@@ -154,6 +154,18 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   // Email campaigns tracking
   const [participantCampaigns, setParticipantCampaigns] = useState<Record<string, string[]>>({});
   
+  // Seat assignments - maps participant_id to seat info
+  const [seatAssignments, setSeatAssignments] = useState<Record<string, { tableName: string; seatNumber: number; tableId: string; assignmentId: string }>>({});
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; name: string; capacity: number; layoutId: string }>>([]);
+  const [tableOccupancy, setTableOccupancy] = useState<Record<string, number>>({}); // tableId -> occupied count
+  const [showSeatAssignDialog, setShowSeatAssignDialog] = useState(false);
+  const [seatAssignParticipant, setSeatAssignParticipant] = useState<Participant | null>(null);
+  const [availableSeatsForTable, setAvailableSeatsForTable] = useState<Array<{ seatNumber: number; isOccupied: boolean; occupantName?: string }>>([]);
+  const [isLoadingSeats, setIsLoadingSeats] = useState(false);
+  const [quickAssignTableId, setQuickAssignTableId] = useState<string>('');
+  const [quickAssignSeatNumber, setQuickAssignSeatNumber] = useState<number>(0);
+  const [isAssigningSeat, setIsAssigningSeat] = useState(false);
+  
   // Calculate pagination
   const totalPages = Math.ceil(filteredParticipants.length / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
@@ -165,7 +177,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     phone: '',
     company: '',
     position: '',
-    customData: {} as Record<string, any>
+    customData: {} as Record<string, any>,
+    selectedSeatTableId: '' as string,
+    selectedSeatNumber: 0 as number
   });
 
   const fetchParticipants = async () => {
@@ -242,11 +256,229 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
     }
   };
 
+  // Fetch seat assignments for all participants
+  const fetchSeatAssignments = async () => {
+    try {
+      // First get all layouts for this event
+      const { data: layouts } = await supabase
+        .from('seating_layouts')
+        .select('id')
+        .eq('event_id', eventId);
+      
+      if (!layouts || layouts.length === 0) return;
+
+      // Get all tables for these layouts
+      const layoutIds = layouts.map(l => l.id);
+      const { data: tables } = await supabase
+        .from('seating_tables')
+        .select('id, name, layout_id, capacity')
+        .in('layout_id', layoutIds);
+      
+      if (!tables || tables.length === 0) return;
+
+      // Get all seat assignments
+      const tableIds = tables.map(t => t.id);
+      const { data: assignments } = await supabase
+        .from('seat_assignments')
+        .select('participant_id, table_id, seat_number')
+        .in('table_id', tableIds)
+        .not('participant_id', 'is', null);
+
+      if (!assignments) return;
+
+      // Build lookup map with full info and count occupancy per table
+      const seatMap: Record<string, { tableName: string; seatNumber: number; tableId: string; assignmentId: string }> = {};
+      const occupancyCount: Record<string, number> = {};
+      
+      // Initialize occupancy count for all tables
+      tables.forEach(t => { occupancyCount[t.id] = 0; });
+      
+      assignments.forEach((a: any) => {
+        if (a.participant_id) {
+          const table = tables.find(t => t.id === a.table_id);
+          if (table) {
+            seatMap[a.participant_id] = {
+              tableName: table.name,
+              seatNumber: a.seat_number,
+              tableId: a.table_id,
+              assignmentId: a.id || ''
+            };
+            // Count occupied seats per table
+            occupancyCount[a.table_id] = (occupancyCount[a.table_id] || 0) + 1;
+          }
+        }
+      });
+      
+      setSeatAssignments(seatMap);
+      setTableOccupancy(occupancyCount);
+      
+      // Also store available tables for assignment
+      setAvailableTables(tables.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        capacity: t.capacity || 10,
+        layoutId: t.layout_id
+      })));
+    } catch (error) {
+      console.error('Error fetching seat assignments:', error);
+    }
+  };
+
+  // Fetch available seats for a specific table
+  const fetchSeatsForTable = async (tableId: string) => {
+    if (!tableId) {
+      setAvailableSeatsForTable([]);
+      return;
+    }
+    
+    setIsLoadingSeats(true);
+    try {
+      // Get table info
+      const { data: tableData } = await supabase
+        .from('seating_tables')
+        .select('capacity')
+        .eq('id', tableId)
+        .single();
+      
+      const capacity = tableData?.capacity || 10;
+      
+      // Get all seat assignments for this table
+      const { data: assignments } = await supabase
+        .from('seat_assignments')
+        .select('seat_number, participant_id')
+        .eq('table_id', tableId);
+      
+      // Get participant names for occupied seats
+      const occupiedSeats: Record<number, string> = {};
+      if (assignments) {
+        const participantIds = assignments.filter(a => a.participant_id).map(a => a.participant_id);
+        if (participantIds.length > 0) {
+          const { data: participantData } = await supabase
+            .from('participants')
+            .select('id, name')
+            .in('id', participantIds);
+          
+          const nameMap: Record<string, string> = {};
+          participantData?.forEach(p => { nameMap[p.id] = p.name; });
+          
+          assignments.forEach(a => {
+            if (a.participant_id) {
+              occupiedSeats[a.seat_number] = nameMap[a.participant_id] || 'Occupied';
+            }
+          });
+        }
+      }
+      
+      // Build seats array
+      const seats = [];
+      for (let i = 1; i <= capacity; i++) {
+        seats.push({
+          seatNumber: i,
+          isOccupied: !!occupiedSeats[i],
+          occupantName: occupiedSeats[i]
+        });
+      }
+      
+      setAvailableSeatsForTable(seats);
+    } catch (error) {
+      console.error('Error fetching seats for table:', error);
+    } finally {
+      setIsLoadingSeats(false);
+    }
+  };
+
+  // Handle quick seat assignment
+  const handleQuickSeatAssign = async () => {
+    if (!seatAssignParticipant || !quickAssignTableId || quickAssignSeatNumber <= 0) return;
+    
+    setIsAssigningSeat(true);
+    try {
+      // Remove old assignment if exists
+      const currentSeat = seatAssignments[seatAssignParticipant.id];
+      if (currentSeat) {
+        await supabase
+          .from('seat_assignments')
+          .update({ participant_id: null })
+          .eq('table_id', currentSeat.tableId)
+          .eq('seat_number', currentSeat.seatNumber);
+      }
+      
+      // Check if seat assignment row exists
+      const { data: existingSeat } = await supabase
+        .from('seat_assignments')
+        .select('id')
+        .eq('table_id', quickAssignTableId)
+        .eq('seat_number', quickAssignSeatNumber)
+        .single();
+      
+      if (existingSeat) {
+        // Update existing row
+        await supabase
+          .from('seat_assignments')
+          .update({ participant_id: seatAssignParticipant.id })
+          .eq('table_id', quickAssignTableId)
+          .eq('seat_number', quickAssignSeatNumber);
+      } else {
+        // Insert new row
+        await supabase
+          .from('seat_assignments')
+          .insert({
+            table_id: quickAssignTableId,
+            seat_number: quickAssignSeatNumber,
+            participant_id: seatAssignParticipant.id
+          });
+      }
+      
+      // Refresh seat assignments
+      await fetchSeatAssignments();
+      
+      // Close dialog and reset
+      setShowSeatAssignDialog(false);
+      setSeatAssignParticipant(null);
+      setQuickAssignTableId('');
+      setQuickAssignSeatNumber(0);
+      setAvailableSeatsForTable([]);
+    } catch (error) {
+      console.error('Error assigning seat:', error);
+    } finally {
+      setIsAssigningSeat(false);
+    }
+  };
+
+  // Handle removing seat assignment
+  const handleRemoveSeatAssignment = async () => {
+    if (!seatAssignParticipant) return;
+    
+    const currentSeat = seatAssignments[seatAssignParticipant.id];
+    if (!currentSeat) return;
+    
+    setIsAssigningSeat(true);
+    try {
+      await supabase
+        .from('seat_assignments')
+        .update({ participant_id: null })
+        .eq('table_id', currentSeat.tableId)
+        .eq('seat_number', currentSeat.seatNumber);
+      
+      await fetchSeatAssignments();
+      
+      setShowSeatAssignDialog(false);
+      setSeatAssignParticipant(null);
+      setQuickAssignTableId('');
+      setQuickAssignSeatNumber(0);
+    } catch (error) {
+      console.error('Error removing seat assignment:', error);
+    } finally {
+      setIsAssigningSeat(false);
+    }
+  };
+
   useEffect(() => {
     fetchParticipants();
     loadColumnSettings();
     loadEmailTemplates();
     loadPrintConfiguration();
+    fetchSeatAssignments();
   }, [eventId, accessToken]);
 
   useEffect(() => {
@@ -1357,7 +1589,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         alert('Participant added successfully!');
       }
       
-      setFormData({ name: '', email: '', phone: '', company: '', position: '', customData: {} });
+      setFormData({ name: '', email: '', phone: '', company: '', position: '', customData: {}, selectedSeatTableId: '', selectedSeatNumber: 0 });
       setSendConfirmationEmail(false);
       setSelectedTemplateId('');
       setIsAddDialogOpen(false);
@@ -1386,14 +1618,48 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         throw new Error('CSV file is empty or invalid');
       }
 
-      // Parse CSV
-      const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+      // Parse CSV with proper handling of quoted values
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current.trim());
+        return result;
+      };
+
+      const headers = parseCSVLine(lines[0]).map(h => h.replace(/"/g, '').trim());
+      
+      // Standard fields mapping
+      const standardFields = ['name', 'email', 'phone', 'company', 'position'];
+      
+      // Build custom field mapping from event's customFields
+      const customFieldMap: Record<string, string> = {};
+      customFields.forEach(field => {
+        // Match by label (case-insensitive) or by field name/id
+        const labelLower = field.label.toLowerCase();
+        const nameLower = field.name.toLowerCase();
+        customFieldMap[labelLower] = field.id;
+        customFieldMap[nameLower] = field.id;
+      });
+
       const participantsToImport = [];
 
       for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        const values = parseCSVLine(lines[i]).map(v => v.replace(/"/g, '').trim());
         const participant: any = {
-          id: `part_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          id: `prt-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
           eventId: eventId,
           registeredAt: new Date().toISOString(),
           attendance: [],
@@ -1401,17 +1667,41 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         };
 
         headers.forEach((header, index) => {
-          if (header === 'name') participant.name = values[index];
-          else if (header === 'email') participant.email = values[index];
-          else if (header === 'phone') participant.phone = values[index];
-          else if (header === 'company') participant.company = values[index];
-          else if (header === 'position') participant.position = values[index];
+          const headerLower = header.toLowerCase();
+          const value = values[index] || '';
+          
+          // Check standard fields first
+          if (headerLower === 'name') {
+            participant.name = value;
+          } else if (headerLower === 'email') {
+            participant.email = value;
+          } else if (headerLower === 'phone') {
+            participant.phone = value;
+          } else if (headerLower === 'company') {
+            participant.company = value;
+          } else if (headerLower === 'position') {
+            participant.position = value;
+          } else if (!standardFields.includes(headerLower) && value) {
+            // This is a custom field - try to match with existing custom fields
+            const fieldId = customFieldMap[headerLower];
+            if (fieldId) {
+              // Matched with existing custom field
+              participant.customData[fieldId] = value;
+            } else {
+              // Store with header name as key (for fields not yet defined)
+              participant.customData[header] = value;
+            }
+          }
         });
 
         if (participant.name && participant.email) {
           participantsToImport.push(participant);
         }
       }
+      
+      console.log('[CSV Import] Headers found:', headers);
+      console.log('[CSV Import] Custom fields in event:', customFields.map(f => f.label));
+      console.log('[CSV Import] Sample participant:', participantsToImport[0]);
 
       if (participantsToImport.length === 0) {
         throw new Error('No valid participants found in CSV');
@@ -1443,14 +1733,21 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
 
   const handleOpenEdit = (participant: Participant) => {
     setEditingParticipant(participant);
+    const seatInfo = seatAssignments[participant.id];
     setFormData({
       name: participant.name,
       email: participant.email,
       phone: participant.phone,
       company: participant.company,
       position: participant.position,
-      customData: participant.customData || {}
+      customData: participant.customData || {},
+      selectedSeatTableId: seatInfo?.tableId || '',
+      selectedSeatNumber: seatInfo?.seatNumber || 0
     });
+    // Load seats for current table if participant has seat assignment
+    if (seatInfo?.tableId) {
+      fetchSeatsForTable(seatInfo.tableId);
+    }
     setError(null);
     setIsEditDialogOpen(true);
   };
@@ -1481,11 +1778,38 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         throw new Error(`Failed to update participant: ${error.message}`);
       }
 
+      // Handle seat assignment changes
+      const currentSeat = seatAssignments[editingParticipant.id];
+      const newTableId = formData.selectedSeatTableId;
+      const newSeatNumber = formData.selectedSeatNumber;
+
+      // If seat changed or removed
+      if (currentSeat?.tableId !== newTableId || currentSeat?.seatNumber !== newSeatNumber) {
+        // Remove old assignment if exists
+        if (currentSeat) {
+          await supabase
+            .from('seat_assignments')
+            .update({ participant_id: null })
+            .eq('table_id', currentSeat.tableId)
+            .eq('seat_number', currentSeat.seatNumber);
+        }
+
+        // Add new assignment if selected
+        if (newTableId && newSeatNumber > 0) {
+          await supabase
+            .from('seat_assignments')
+            .update({ participant_id: editingParticipant.id })
+            .eq('table_id', newTableId)
+            .eq('seat_number', newSeatNumber);
+        }
+      }
+
       setIsEditDialogOpen(false);
       setEditingParticipant(null);
       
-      // Refresh participants list
+      // Refresh participants list and seat assignments
       await fetchParticipants();
+      await fetchSeatAssignments();
       
       // Reset form
       setFormData({
@@ -1494,7 +1818,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         phone: '',
         company: '',
         position: '',
-        customData: {}
+        customData: {},
+        selectedSeatTableId: '',
+        selectedSeatNumber: 0
       });
     } catch (err: any) {
       console.error('[SUPABASE] Error updating participant:', err);
@@ -1732,33 +2058,38 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   }
 
   return (
-    <>
-    <Card className="border-0 shadow-xl bg-white" style={{ position: 'relative', zIndex: 0 }}>
-      <CardHeader className="border-b border-gray-100 bg-gradient-to-r from-purple-50 to-pink-50">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-3 text-2xl">
-              <div className="w-10 h-10 gradient-primary rounded-xl flex items-center justify-center shadow-md shadow-purple-500/30">
-                <Users className="h-5 w-5 text-white" />
-              </div>
-              Participants Management
-            </CardTitle>
-            <CardDescription className="flex items-center gap-3 mt-2 text-base">
-              <span className="bg-white px-3 py-1 rounded-full border border-purple-200">
-                Total: <span className="font-semibold text-purple-700">{participants.length}</span>
-              </span>
-              <span className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                Auto-sync • Updated {lastUpdated.toLocaleTimeString()}
-              </span>
-            </CardDescription>
+    <div className="space-y-6">
+      {/* Header - Outside Card */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Users className="h-6 w-6 text-white" />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Participants Management</h2>
+            <p className="text-sm text-gray-600 mt-1 flex items-center gap-4">
+              <span>Total: <span className="font-semibold text-primary-700">{participants.length}</span></span>
+              <span className="inline-flex items-center gap-2">
+                <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                <span>Auto-sync • Updated {lastUpdated.toLocaleTimeString()}</span>
+              </span>
+            </p>
+          </div>
+        </div>
+        <Button onClick={() => setIsAddDialogOpen(true)} className="gradient-primary hover:opacity-90 text-white shadow-primary">
+          <Plus className="mr-2 h-4 w-4" />
+          Add Participant
+        </Button>
+      </div>
+
+    <Card className="border-0 shadow-xl bg-white" style={{ position: 'relative', zIndex: 0 }}>
+      <CardHeader className="border-b border-gray-100 py-3">
+        <div className="flex flex-wrap gap-2">
             <Button 
               onClick={copyRegistrationURL} 
               variant="outline"
               size="sm"
-              className="border-purple-300 hover:border-purple-500 hover:bg-purple-50"
+              className="border-primary-300 hover:border-primary-500 hover:bg-primary-50"
             >
               <Link2 className="mr-2 h-4 w-4" />
               Copy Registration URL
@@ -1804,20 +2135,18 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
               onClick={() => setShowTemplateSelector(true)} 
               variant="outline" 
               size="sm" 
-              className="border-purple-300 hover:border-purple-400 text-purple-700 hover:bg-purple-50"
+              className="border-primary-300 hover:border-primary-400 text-primary-700 hover:bg-primary-50"
               disabled={selectedParticipantIds.size === 0}
             >
               <Printer className="mr-2 h-4 w-4" />
               Print Badges {selectedParticipantIds.size > 0 && `(${selectedParticipantIds.size})`}
             </Button>
-            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="gradient-primary hover:opacity-90 shadow-md shadow-purple-500/30">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Participant
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          </div>
+      </CardHeader>
+
+      {/* Add Participant Dialog */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
                 <DialogHeader>
                   <DialogTitle>Add Participant Manually</DialogTitle>
                   <DialogDescription>
@@ -2081,6 +2410,80 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     </div>
                   </div>
 
+                  {/* Seat Assignment */}
+                  {availableTables.length > 0 && (
+                    <div className="border-t pt-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm font-semibold text-gray-700">Seat Assignment</div>
+                        {formData.selectedSeatTableId && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-red-600 hover:text-red-700 h-6 px-2"
+                            onClick={() => {
+                              setFormData(prev => ({ ...prev, selectedSeatTableId: '', selectedSeatNumber: 0 }));
+                              setAvailableSeatsForTable([]);
+                            }}
+                          >
+                            Clear Seat
+                          </Button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-seat-table">Table</Label>
+                          <Select
+                            value={formData.selectedSeatTableId || undefined}
+                            onValueChange={(value) => {
+                              setFormData(prev => ({ ...prev, selectedSeatTableId: value, selectedSeatNumber: 0 }));
+                              fetchSeatsForTable(value);
+                            }}
+                          >
+                            <SelectTrigger id="edit-seat-table">
+                              <SelectValue placeholder="Select table" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableTables.map(table => {
+                                const occupied = tableOccupancy[table.id] || 0;
+                                const available = table.capacity - occupied;
+                                return (
+                                  <SelectItem key={table.id} value={table.id}>
+                                    {table.name} ({available} available)
+                                  </SelectItem>
+                                );
+                              })}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <Label htmlFor="edit-seat-number">Seat Number</Label>
+                          <Select
+                            value={formData.selectedSeatNumber > 0 ? String(formData.selectedSeatNumber) : undefined}
+                            onValueChange={(value) => setFormData(prev => ({ ...prev, selectedSeatNumber: parseInt(value) || 0 }))}
+                            disabled={!formData.selectedSeatTableId || isLoadingSeats}
+                          >
+                            <SelectTrigger id="edit-seat-number">
+                              <SelectValue placeholder={isLoadingSeats ? "Loading..." : "Select seat"} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableSeatsForTable.map(seat => (
+                                <SelectItem 
+                                  key={seat.seatNumber} 
+                                  value={String(seat.seatNumber)}
+                                  disabled={seat.isOccupied && seat.occupantName !== editingParticipant?.name}
+                                >
+                                  Seat {seat.seatNumber} {seat.isOccupied ? `(${seat.occupantName})` : ''}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Dynamic Custom Fields */}
                   {customFields.length > 0 && (
                     <div className="border-t pt-4 space-y-4">
@@ -2242,9 +2645,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                 </div>
               </DialogContent>
             </Dialog>
-          </div>
-        </div>
-      </CardHeader>
+
       <CardContent className="pt-6">
         <div className="mb-6 space-y-3">
           <div className="flex gap-3">
@@ -2254,7 +2655,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                 placeholder="Quick search across all fields..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-12 h-12 bg-gray-50 border-gray-200 focus:bg-white focus:border-purple-300 transition-colors"
+                className="pl-12 h-12 bg-gray-50 border-gray-200 focus:bg-white focus:border-primary-300 transition-colors"
               />
             </div>
             
@@ -2278,12 +2679,12 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
               }}
               variant="outline" 
               size="sm" 
-              className={`h-12 border-gray-300 hover:border-gray-400 ${showAdvancedFilters ? 'bg-purple-50 border-purple-300 text-purple-700' : ''}`}
+              className={`h-12 border-gray-300 hover:border-gray-400 ${showAdvancedFilters ? 'bg-primary-50 border-primary-300 text-primary-700' : ''}`}
             >
               <Filter className="h-4 w-4 mr-2" />
               Filters
               {columnFilters.length > 0 && (
-                <Badge className="ml-2 bg-purple-600 text-white text-xs px-1.5 py-0.5">
+                <Badge className="ml-2 bg-primary-600 text-white text-xs px-1.5 py-0.5">
                   {columnFilters.length}
                 </Badge>
               )}
@@ -2310,7 +2711,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                   onClick={handleBulkEmail}
                   variant="outline" 
                   size="sm" 
-                  className="border-purple-300 text-purple-600 hover:bg-purple-50 hover:border-purple-400"
+                  className="border-primary-300 text-primary-600 hover:bg-primary-50 hover:border-primary-400"
                 >
                   Email Selected
                 </Button>
@@ -2332,9 +2733,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
 
           {/* Advanced Filters Panel */}
           {showAdvancedFilters && (
-            <div className="bg-white border border-purple-200 rounded-lg p-3 shadow-sm">
+            <div className="bg-white border border-primary-200 rounded-lg p-3 shadow-sm">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-purple-900">Column Filters</h3>
+                <h3 className="text-sm font-semibold text-primary-900">Column Filters</h3>
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
@@ -2382,7 +2783,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           updated[index].column = e.target.value;
                           setStagingFilters(updated);
                         }}
-                        className="flex-1 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-purple-300 focus:ring-1 focus:ring-purple-100"
+                        className="flex-1 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-primary-300 focus:ring-1 focus:ring-primary-100"
                       >
                         <optgroup label="Basic">
                           <option value="name">Name</option>
@@ -2415,7 +2816,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           updated[index].operator = e.target.value as any;
                           setStagingFilters(updated);
                         }}
-                        className="w-32 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-purple-300 focus:ring-1 focus:ring-purple-100"
+                        className="w-32 h-8 px-2 rounded-md border border-gray-300 bg-white text-xs focus:border-primary-300 focus:ring-1 focus:ring-primary-100"
                       >
                         <option value="contains">Contains</option>
                         <option value="equals">Equals</option>
@@ -2461,7 +2862,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                   {stagingFilters.length > 0 ? (
                     <span>{stagingFilters.length} filter{stagingFilters.length > 1 ? 's' : ''} ready</span>
                   ) : columnFilters.length > 0 ? (
-                    <span className="text-purple-700 font-medium">{columnFilters.length} active</span>
+                    <span className="text-primary-700 font-medium">{columnFilters.length} active</span>
                   ) : (
                     <span className="text-gray-400">No filters</span>
                   )}
@@ -2488,7 +2889,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       setColumnFilters([...stagingFilters]);
                     }}
                     size="sm"
-                    className="h-8 px-4 text-xs gradient-primary hover:opacity-90 text-white shadow-md shadow-purple-500/30"
+                    className="h-8 px-4 text-xs gradient-primary hover:opacity-90 text-white shadow-md shadow-primary-500/30"
                   >
                     Apply
                   </Button>
@@ -2532,7 +2933,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
             }}
           >
             {/* Use native table instead of shadcn Table component for sticky header */}
-            <table className="w-full caption-bottom text-sm" style={{ minWidth: '1300px' }}>
+            <table className="w-full caption-bottom text-sm" style={{ minWidth: '1300px', tableLayout: 'fixed' }}>
               <thead style={{ 
                 position: 'sticky', 
                 top: 0, 
@@ -2637,6 +3038,13 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <ResizeHandle columnKey="position" />
                     </TableHead>
                   )}
+                  {/* Seat Column */}
+                  <TableHead 
+                    className="relative"
+                    style={{ width: '120px', minWidth: '120px' }}
+                  >
+                    <span className="font-semibold">Seat</span>
+                  </TableHead>
                   {customFields.map(field => {
                     const columnKey = `custom_${field.name}`;
                     const width = columnWidths[columnKey] || 150;
@@ -2716,7 +3124,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
             <TableBody>
               {paginatedParticipants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4 + 
+                  <TableCell colSpan={5 + 
                     (columnVisibility.phone ? 1 : 0) +
                     (columnVisibility.company ? 1 : 0) +
                     (columnVisibility.position ? 1 : 0) +
@@ -2746,28 +3154,28 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                     <TableCell 
                       className="font-mono text-xs truncate" 
                       title={participant.id}
-                      style={{ width: `${columnWidths.id}px`, maxWidth: `${columnWidths.id}px` }}
+                      style={{ width: `${columnWidths.id}px`, maxWidth: `${columnWidths.id}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                       {participant.id.substring(5, 15)}...
                     </TableCell>
                     <TableCell 
                       className="font-medium truncate"
                       title={participant.name}
-                      style={{ width: `${columnWidths.name}px`, maxWidth: `${columnWidths.name}px` }}
+                      style={{ width: `${columnWidths.name}px`, maxWidth: `${columnWidths.name}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                       {participant.name}
                     </TableCell>
                     <TableCell 
                       className="text-sm truncate"
                       title={participant.email}
-                      style={{ width: `${columnWidths.email}px`, maxWidth: `${columnWidths.email}px` }}
+                      style={{ width: `${columnWidths.email}px`, maxWidth: `${columnWidths.email}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     >
                       {participant.email}
                     </TableCell>
                     {columnVisibility.phone && (
                       <TableCell 
                         className="truncate"
-                        style={{ width: `${columnWidths.phone}px`, maxWidth: `${columnWidths.phone}px` }}
+                        style={{ width: `${columnWidths.phone}px`, maxWidth: `${columnWidths.phone}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                       >
                         {participant.phone || '-'}
                       </TableCell>
@@ -2776,7 +3184,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <TableCell 
                         className="truncate"
                         title={participant.company || '-'}
-                        style={{ width: `${columnWidths.company}px`, maxWidth: `${columnWidths.company}px` }}
+                        style={{ width: `${columnWidths.company}px`, maxWidth: `${columnWidths.company}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                       >
                         {participant.company || '-'}
                       </TableCell>
@@ -2785,11 +3193,39 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <TableCell 
                         className="truncate"
                         title={participant.position || '-'}
-                        style={{ width: `${columnWidths.position}px`, maxWidth: `${columnWidths.position}px` }}
+                        style={{ width: `${columnWidths.position}px`, maxWidth: `${columnWidths.position}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                       >
                         {participant.position || '-'}
                       </TableCell>
                     )}
+                    {/* Seat Cell */}
+                    <TableCell style={{ width: '120px', maxWidth: '120px' }}>
+                      {seatAssignments[participant.id] ? (
+                        <Badge 
+                          variant="outline" 
+                          className="bg-primary-50 text-primary-700 text-xs cursor-pointer hover:bg-primary-100 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeatAssignParticipant(participant);
+                            setShowSeatAssignDialog(true);
+                          }}
+                        >
+                          {seatAssignments[participant.id].tableName} - {seatAssignments[participant.id].seatNumber}
+                        </Badge>
+                      ) : (
+                        <Badge 
+                          variant="outline" 
+                          className="text-gray-400 text-xs cursor-pointer hover:bg-gray-100 transition-colors border-dashed"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSeatAssignParticipant(participant);
+                            setShowSeatAssignDialog(true);
+                          }}
+                        >
+                          + Assign
+                        </Badge>
+                      )}
+                    </TableCell>
                     {customFields.map(field => {
                       const columnKey = `custom_${field.name}`;
                       const width = columnWidths[columnKey] || 150;
@@ -2800,7 +3236,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                           key={field.id}
                           className="truncate"
                           title={value}
-                          style={{ width: `${width}px`, maxWidth: `${width}px` }}
+                          style={{ width: `${width}px`, maxWidth: `${width}px`, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                         >
                           {value}
                         </TableCell>
@@ -3061,7 +3497,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
           </div>
         ) : (
           <div className="py-8 text-center">
-            <Loader2 className="h-12 w-12 animate-spin mx-auto text-purple-600" />
+            <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary-600" />
             <p className="mt-4 text-gray-700">Sending email...</p>
           </div>
         )}
@@ -3073,7 +3509,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Printer className="h-5 w-5 text-purple-600" />
+            <Printer className="h-5 w-5 text-primary-600" />
             Print Badges
           </DialogTitle>
           <DialogDescription>
@@ -3101,7 +3537,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
                       <div className="flex items-center gap-2">
                         <span>{template.name}</span>
                         {template.is_default && (
-                          <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Default</span>
+                          <span className="text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded">Default</span>
                         )}
                       </div>
                     </SelectItem>
@@ -3110,8 +3546,8 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
               </Select>
             </div>
           ) : badgeTemplate ? (
-            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-              <p className="text-sm text-purple-800">
+            <div className="p-3 bg-primary-50 border border-primary-200 rounded-lg">
+              <p className="text-sm text-primary-800">
                 Using default badge template from event settings.
               </p>
             </div>
@@ -3155,6 +3591,177 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       </DialogContent>
     </Dialog>
 
+    {/* Quick Seat Assignment Dialog */}
+    <Dialog 
+      open={showSeatAssignDialog} 
+      onOpenChange={(open) => {
+        setShowSeatAssignDialog(open);
+        if (!open) {
+          setSeatAssignParticipant(null);
+          setQuickAssignTableId('');
+          setQuickAssignSeatNumber(0);
+          setAvailableSeatsForTable([]);
+        }
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Assign Seat</DialogTitle>
+          <DialogDescription>
+            {seatAssignParticipant && (
+              <>Assign seat for <strong>{seatAssignParticipant.name}</strong></>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4 py-4">
+          {/* Current Assignment */}
+          {seatAssignParticipant && seatAssignments[seatAssignParticipant.id] && (
+            <div className="p-3 bg-primary-50 border border-primary-200 rounded-lg">
+              <p className="text-sm text-primary-800">
+                Currently assigned to: <strong>{seatAssignments[seatAssignParticipant.id].tableName} - Seat {seatAssignments[seatAssignParticipant.id].seatNumber}</strong>
+              </p>
+            </div>
+          )}
+          
+          {/* Table Selection */}
+          <div className="space-y-2">
+            <Label>Select Table</Label>
+            <Select
+              value={quickAssignTableId}
+              onValueChange={(value) => {
+                setQuickAssignTableId(value);
+                setQuickAssignSeatNumber(0);
+                fetchSeatsForTable(value);
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a table" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableTables.map(table => {
+                  const occupied = tableOccupancy[table.id] || 0;
+                  const available = table.capacity - occupied;
+                  return (
+                    <SelectItem key={table.id} value={table.id}>
+                      {table.name} ({available} available)
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {/* Seat Selection */}
+          {quickAssignTableId && (
+            <div className="space-y-2">
+              <Label>Select Seat</Label>
+              {isLoadingSeats ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary-600" />
+                  <span className="ml-2 text-sm text-gray-500">Loading seats...</span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2 p-3 border rounded-lg bg-gray-50">
+                  {availableSeatsForTable.map(seat => {
+                    const isCurrentParticipant = seat.occupantName === seatAssignParticipant?.name;
+                    const isSelected = quickAssignSeatNumber === seat.seatNumber;
+                    
+                    return (
+                      <button
+                        key={seat.seatNumber}
+                        type="button"
+                        onClick={() => {
+                          if (!seat.isOccupied || isCurrentParticipant) {
+                            setQuickAssignSeatNumber(seat.seatNumber);
+                          }
+                        }}
+                        disabled={seat.isOccupied && !isCurrentParticipant}
+                        className={`
+                          w-10 h-10 flex items-center justify-center text-sm font-medium rounded-lg border-2 transition-all
+                          ${isSelected 
+                            ? 'bg-primary-600 text-white border-primary-600 shadow-md scale-105' 
+                            : seat.isOccupied && !isCurrentParticipant
+                              ? 'bg-gray-200 text-gray-400 cursor-not-allowed border-gray-300'
+                              : isCurrentParticipant
+                                ? 'bg-primary-100 text-primary-700 border-primary-400 hover:bg-primary-200'
+                                : 'bg-white hover:bg-primary-50 border-gray-300 hover:border-primary-400'
+                          }
+                        `}
+                        title={seat.isOccupied ? seat.occupantName : `Seat ${seat.seatNumber}`}
+                      >
+                        {seat.seatNumber}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              
+              {/* Legend */}
+              <div className="flex gap-4 text-xs text-gray-500 mt-2">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 bg-white border border-gray-200 rounded"></div>
+                  <span>Available</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 bg-gray-100 border border-gray-200 rounded"></div>
+                  <span>Occupied</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 bg-primary-600 rounded"></div>
+                  <span>Selected</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="flex gap-2 justify-between pt-4 border-t">
+          <div>
+            {seatAssignParticipant && seatAssignments[seatAssignParticipant.id] && (
+              <Button
+                variant="outline"
+                onClick={handleRemoveSeatAssignment}
+                disabled={isAssigningSeat}
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                Remove Seat
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSeatAssignDialog(false);
+                setSeatAssignParticipant(null);
+                setQuickAssignTableId('');
+                setQuickAssignSeatNumber(0);
+                setAvailableSeatsForTable([]);
+              }}
+              disabled={isAssigningSeat}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleQuickSeatAssign}
+              disabled={!quickAssignTableId || quickAssignSeatNumber <= 0 || isAssigningSeat}
+              className="gradient-primary"
+            >
+              {isAssigningSeat ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Assigning...
+                </>
+              ) : (
+                'Assign Seat'
+              )}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
     {/* Badge Print View - Hidden except when printing */}
     {badgeTemplate && (
       <BadgePrintView
@@ -3165,6 +3772,6 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         eventName={eventName}
       />
     )}
-    </>
+    </div>
   );
 }

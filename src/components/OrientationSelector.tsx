@@ -20,7 +20,7 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
 
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-semibold text-slate-700">
+      <Label className="text-xs font-semibold text-neutral-700">
         Orientation
       </Label>
       
@@ -33,8 +33,8 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           htmlFor="orientation-portrait"
           className={`flex items-center gap-2 rounded-md px-2 py-2 text-xs cursor-pointer transition-all border ${
             configuration.orientation === 'portrait'
-              ? 'border-purple-500 bg-purple-50'
-              : 'border-slate-200 hover:border-purple-300 hover:bg-purple-50/50'
+              ? 'border-primary-500 bg-primary-50'
+              : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/50'
           }`}
         >
           <RadioGroupItem value="portrait" id="orientation-portrait" className="sr-only" />
@@ -42,7 +42,7 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           {/* Portrait Icon */}
           <svg
             className={`w-5 h-7 ${
-              configuration.orientation === 'portrait' ? 'text-purple-600' : 'text-slate-400'
+              configuration.orientation === 'portrait' ? 'text-primary-600' : 'text-neutral-400'
             }`}
             fill="none"
             viewBox="0 0 24 32"
@@ -60,7 +60,7 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           </svg>
           
           <span className={`font-medium ${
-            configuration.orientation === 'portrait' ? 'text-purple-900' : 'text-slate-700'
+            configuration.orientation === 'portrait' ? 'text-primary-900' : 'text-neutral-700'
           }`}>
             Portrait
           </span>
@@ -70,8 +70,8 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           htmlFor="orientation-landscape"
           className={`flex items-center gap-2 rounded-md px-2 py-2 text-xs cursor-pointer transition-all border ${
             configuration.orientation === 'landscape'
-              ? 'border-purple-500 bg-purple-50'
-              : 'border-slate-200 hover:border-purple-300 hover:bg-purple-50/50'
+              ? 'border-primary-500 bg-primary-50'
+              : 'border-neutral-200 hover:border-primary-300 hover:bg-primary-50/50'
           }`}
         >
           <RadioGroupItem value="landscape" id="orientation-landscape" className="sr-only" />
@@ -79,7 +79,7 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           {/* Landscape Icon */}
           <svg
             className={`w-7 h-5 ${
-              configuration.orientation === 'landscape' ? 'text-purple-600' : 'text-slate-400'
+              configuration.orientation === 'landscape' ? 'text-primary-600' : 'text-neutral-400'
             }`}
             fill="none"
             viewBox="0 0 32 24"
@@ -97,7 +97,7 @@ export function OrientationSelector({ configuration, onConfigurationChange }: Or
           </svg>
           
           <span className={`font-medium ${
-            configuration.orientation === 'landscape' ? 'text-purple-900' : 'text-slate-700'
+            configuration.orientation === 'landscape' ? 'text-primary-900' : 'text-neutral-700'
           }`}>
             Landscape
           </span>

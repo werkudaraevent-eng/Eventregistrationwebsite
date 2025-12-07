@@ -148,7 +148,7 @@ export function BadgeTemplateSelector({
               <div className="flex items-center gap-2">
                 <span>{template.name}</span>
                 {template.is_default && (
-                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">
+                  <span className="text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded">
                     Default
                   </span>
                 )}

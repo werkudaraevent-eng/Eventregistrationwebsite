@@ -608,13 +608,13 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
   const getTemplateTypeBadgeColor = (type: EmailTemplate['type']) => {
     switch (type) {
       case 'registration_confirmation':
-        return 'bg-green-100 text-green-800 border-green-300';
+        return 'bg-success-light text-success border-success/30';
       case 'reminder':
-        return 'bg-blue-100 text-blue-800 border-blue-300';
+        return 'bg-info-light text-info border-info/30';
       case 'custom':
-        return 'bg-purple-100 text-purple-800 border-purple-300';
+        return 'bg-primary-100 text-primary-800 border-primary-300';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
+        return 'bg-neutral-100 text-neutral-700 border-neutral-300';
     }
   };
 
@@ -623,7 +623,7 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
             <Mail className="h-6 w-6 text-white" />
           </div>
           <div>
@@ -635,7 +635,7 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
         </div>
         <Button
           onClick={handleCreateTemplate}
-          className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-lg"
+          className="gradient-primary hover:opacity-90 text-white shadow-primary"
         >
           <Plus className="mr-2 h-4 w-4" />
           Create Template
@@ -687,8 +687,8 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                 </div>
                 {/* Attachments Indicator */}
                 {template.attachments && template.attachments.length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
-                    <div className="flex items-center gap-2 text-xs text-blue-900">
+                  <div className="bg-info-light border border-info/20 rounded-lg p-2">
+                    <div className="flex items-center gap-2 text-xs text-info">
                       <Paperclip className="h-3 w-3" />
                       <span className="font-medium">
                         {template.attachments.length} Attachment{template.attachments.length > 1 ? 's' : ''}
@@ -696,12 +696,12 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                     </div>
                     <div className="mt-1 space-y-1">
                       {template.attachments.slice(0, 2).map((url, idx) => (
-                        <div key={idx} className="text-xs text-blue-700 truncate">
+                        <div key={idx} className="text-xs text-info/80 truncate">
                           • {getFileNameFromUrl(url)}
                         </div>
                       ))}
                       {template.attachments.length > 2 && (
-                        <div className="text-xs text-blue-600 font-medium">
+                        <div className="text-xs text-info font-medium">
                           +{template.attachments.length - 2} more
                         </div>
                       )}
@@ -710,14 +710,14 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                 )}
                 {/* QR Code Indicator */}
                 {template.include_qr_code && (
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-2">
-                    <div className="flex items-center gap-2 text-xs text-purple-900">
+                  <div className="bg-primary-50 border border-primary-200 rounded-lg p-2">
+                    <div className="flex items-center gap-2 text-xs text-primary-900">
                       <span className="text-base">📱</span>
                       <span className="font-medium">
                         QR Code Enabled
                       </span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-700">
+                    <div className="mt-1 text-xs text-primary-700">
                       Participant QR codes will be attached
                     </div>
                   </div>
@@ -729,7 +729,7 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                   <Button
                     onClick={() => handleOpenTestDialog(template)}
                     variant="outline"
-                    className="w-full border-blue-300 text-blue-700 hover:bg-blue-50"
+                    className="w-full border-info/50 text-info hover:bg-info-light"
                     size="sm"
                   >
                     <Mail className="mr-2 h-3 w-3" />
@@ -760,7 +760,7 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                     onClick={() => handleDeleteTemplate(template.id)}
                     variant="outline"
                     size="sm"
-                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                    className="text-error hover:bg-error-light hover:text-error"
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
@@ -997,20 +997,20 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="text-xs font-semibold text-blue-900 mb-2">Available Placeholders:</div>
-              <div className="grid grid-cols-3 gap-2 text-xs text-blue-800">
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{name}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{email}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_name}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_date}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_location}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{company}}'}</code>
+            <div className="bg-info-light border border-info/20 rounded-lg p-3">
+              <div className="text-xs font-semibold text-info mb-2">Available Placeholders:</div>
+              <div className="grid grid-cols-3 gap-2 text-xs text-info/90">
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{name}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{email}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_name}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_date}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_location}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{company}}'}</code>
               </div>
             </div>
 
             {/* QR Code Option - CREATE DIALOG */}
-            <div className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg">
+            <div className="flex items-start gap-3 p-3 bg-gradient-to-r from-primary-50 to-sky-50 border border-primary-200 rounded-lg">
               <Checkbox
                 id="include-qr-create"
                 checked={formData.include_qr_code}
@@ -1021,11 +1021,11 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               <div className="flex-1">
                 <Label 
                   htmlFor="include-qr-create" 
-                  className="text-sm font-medium text-purple-900 cursor-pointer"
+                  className="text-sm font-medium text-primary-900 cursor-pointer"
                 >
                   📱 Include Participant QR Code
                 </Label>
-                <p className="text-xs text-purple-700 mt-1">
+                <p className="text-xs text-primary-700 mt-1">
                   Each participant will receive their unique QR code as an attachment
                 </p>
               </div>
@@ -1268,20 +1268,20 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               </div>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="text-xs font-semibold text-blue-900 mb-2">Available Placeholders:</div>
-              <div className="grid grid-cols-3 gap-2 text-xs text-blue-800">
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{name}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{email}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_name}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_date}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{event_location}}'}</code>
-                <code className="bg-blue-100 px-2 py-1 rounded">{'{{company}}'}</code>
+            <div className="bg-info-light border border-info/20 rounded-lg p-3">
+              <div className="text-xs font-semibold text-info mb-2">Available Placeholders:</div>
+              <div className="grid grid-cols-3 gap-2 text-xs text-info/90">
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{name}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{email}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_name}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_date}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{event_location}}'}</code>
+                <code className="bg-info/10 px-2 py-1 rounded">{'{{company}}'}</code>
               </div>
             </div>
 
             {/* QR Code Option - EDIT DIALOG */}
-            <div className="flex items-start gap-3 p-3 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg">
+            <div className="flex items-start gap-3 p-3 bg-gradient-to-r from-primary-50 to-sky-50 border border-primary-200 rounded-lg">
               <Checkbox
                 id="include-qr-edit"
                 checked={formData.include_qr_code}
@@ -1292,11 +1292,11 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               <div className="flex-1">
                 <Label 
                   htmlFor="include-qr-edit" 
-                  className="text-sm font-medium text-purple-900 cursor-pointer"
+                  className="text-sm font-medium text-primary-900 cursor-pointer"
                 >
                   📱 Include Participant QR Code
                 </Label>
-                <p className="text-xs text-purple-700 mt-1">
+                <p className="text-xs text-primary-700 mt-1">
                   Each participant will receive their unique QR code as an attachment
                 </p>
               </div>
@@ -1323,9 +1323,9 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
           {!isSending ? (
             <>
               <div className="space-y-4">
-                <Alert className="border-blue-200 bg-blue-50">
-                  <Mail className="h-4 w-4 text-blue-600" />
-                  <AlertDescription className="text-blue-900">
+                <Alert className="border-info/20 bg-info-light">
+                  <Mail className="h-4 w-4 text-info" />
+                  <AlertDescription className="text-info">
                     <div className="font-semibold mb-1">Template: {sendingTemplate?.name}</div>
                     <div className="text-sm">This will send personalized emails to all participants.</div>
                   </AlertDescription>
@@ -1357,8 +1357,8 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
                   )}
                 </div>
 
-                <Alert className="border-amber-200 bg-amber-50">
-                  <AlertDescription className="text-amber-900 text-sm">
+                <Alert className="border-warning/20 bg-warning-light">
+                  <AlertDescription className="text-warning text-sm">
                     <strong>⚠️ Important:</strong> Currently in simulation mode. To actually send emails, you need to configure an email service (SendGrid, AWS SES, etc.) in your Supabase Edge Functions.
                   </AlertDescription>
                 </Alert>
@@ -1377,20 +1377,20 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
           ) : (
             <div className="py-8">
               <div className="text-center space-y-4">
-                <Loader2 className="h-12 w-12 animate-spin mx-auto text-purple-600" />
+                <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary-600" />
                 <div>
                   <div className="text-lg font-semibold">Sending emails...</div>
                   <div className="text-sm text-gray-600 mt-2">
                     {sendProgress.sent} of {sendProgress.total} sent
                     {sendProgress.failed > 0 && (
-                      <span className="text-red-600 ml-2">
+                      <span className="text-error ml-2">
                         ({sendProgress.failed} failed)
                       </span>
                     )}
                   </div>
                   <div className="mt-4 w-full bg-gray-200 rounded-full h-2">
                     <div 
-                      className="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full transition-all duration-300"
+                      className="gradient-primary h-2 rounded-full transition-all duration-300"
                       style={{ width: `${(sendProgress.sent / sendProgress.total) * 100}%` }}
                     />
                   </div>
@@ -1426,10 +1426,10 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               </div>
 
               {/* Sample Data Info */}
-              <Alert className="border-blue-200 bg-blue-50">
-                <AlertDescription className="text-sm text-blue-900">
+              <Alert className="border-info/20 bg-info-light">
+                <AlertDescription className="text-sm text-info">
                   📧 The test email will use sample participant data:
-                  <div className="mt-2 ml-4 text-xs space-y-1 text-blue-800">
+                  <div className="mt-2 ml-4 text-xs space-y-1 text-info/90">
                     <div>• Name: John Doe</div>
                     <div>• Email: {testEmail || '[your test email]'}</div>
                     <div>• Phone: +62 812-3456-7890</div>
@@ -1470,8 +1470,8 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
               </div>
 
               {/* Warning */}
-              <Alert className="border-amber-200 bg-amber-50">
-                <AlertDescription className="text-sm text-amber-900">
+              <Alert className="border-warning/20 bg-warning-light">
+                <AlertDescription className="text-sm text-warning">
                   ⚠️ <strong>Simulation Mode:</strong> Currently in simulation mode. 
                   Email preview will be shown in the browser console. 
                   Configure an email service (SendGrid/AWS SES) to actually send emails.
@@ -1502,7 +1502,7 @@ export function EmailTemplates({ eventId }: EmailTemplatesProps) {
             </div>
           ) : (
             <div className="py-8 text-center">
-              <Loader2 className="h-12 w-12 animate-spin mx-auto text-purple-600" />
+              <Loader2 className="h-12 w-12 animate-spin mx-auto text-primary-600" />
               <p className="mt-4 text-gray-700">Sending test email...</p>
             </div>
           )}

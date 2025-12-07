@@ -172,8 +172,8 @@ export default function EmailCenter({ eventId, eventName }: Props) {
     const config: Record<string, { label: string; className: string; icon: any }> = {
       sent: { label: 'Sent', className: 'bg-blue-100 text-blue-800 border-blue-200', icon: Send },
       delivered: { label: 'Delivered', className: 'bg-green-100 text-green-800 border-green-200', icon: CheckCircle },
-      opened: { label: 'Opened', className: 'bg-purple-100 text-purple-800 border-purple-200', icon: Eye },
-      clicked: { label: 'Clicked', className: 'bg-indigo-100 text-indigo-800 border-indigo-200', icon: TrendingUp },
+      opened: { label: 'Opened', className: 'bg-primary-100 text-primary-800 border-primary-200', icon: Eye },
+      clicked: { label: 'Clicked', className: 'bg-primary-100 text-primary-800 border-primary-200', icon: TrendingUp },
       failed: { label: 'Failed', className: 'bg-red-100 text-red-800 border-red-200', icon: AlertCircle },
       pending: { label: 'Pending', className: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock },
       bounced: { label: 'Bounced', className: 'bg-orange-100 text-orange-800 border-orange-200', icon: AlertCircle }
@@ -217,11 +217,14 @@ export default function EmailCenter({ eventId, eventName }: Props) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-            Email Center
-          </h2>
-          <p className="text-gray-600 mt-1">Monitor and manage email campaigns for {eventName}</p>
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Mail className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Email Center</h2>
+            <p className="text-sm text-gray-600 mt-1">Monitor and manage email campaigns for {eventName}</p>
+          </div>
         </div>
         <Button onClick={handleRefresh} variant="outline" className="gap-2">
           <RefreshCw className="h-4 w-4" />
@@ -462,7 +465,7 @@ export default function EmailCenter({ eventId, eventName }: Props) {
             <Card className="hover:shadow-lg transition-shadow cursor-pointer col-span-full">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Calendar className="h-5 w-5 text-purple-600" />
+                  <Calendar className="h-5 w-5 text-primary-600" />
                   Schedule Campaign
                 </CardTitle>
                 <CardDescription>

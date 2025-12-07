@@ -191,11 +191,11 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-sky-50 to-cyan-50">
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="container mx-auto px-6 py-5 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Event Management System</h1>
+            <h1 className="text-2xl font-bold text-primary-700">Event Management System</h1>
             <p className="text-sm text-gray-600 mt-1">
               Select an event to manage or create a new one
             </p>
@@ -216,7 +216,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                 {events.length} {events.length === 1 ? 'event' : 'events'} total
               </p>
             </div>
-            <Button onClick={handleCreateEvent} size="lg" className="gradient-primary hover:opacity-90 shadow-lg shadow-purple-500/30 h-12 px-6">
+            <Button onClick={handleCreateEvent} size="lg" className="gradient-primary hover:opacity-90 shadow-primary h-12 px-6">
               <Plus className="mr-2 h-5 w-5" />
               Create New Event
             </Button>
@@ -226,14 +226,14 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
             <Card className="border-2 border-dashed border-gray-300 bg-white/60 backdrop-blur-sm">
               <CardContent className="flex flex-col items-center justify-center py-20">
                 <div className="w-20 h-20 gradient-primary-soft rounded-2xl flex items-center justify-center mb-6">
-                  <CalendarDays className="h-10 w-10 text-purple-600" />
+                  <CalendarDays className="h-10 w-10 text-primary-600" />
                 </div>
                 <h3 className="text-2xl mb-3">No events yet</h3>
                 <p className="text-gray-600 mb-8 text-center max-w-md text-lg">
                   Get started by creating your first event. You'll be able to manage participants,
                   agenda, and track attendance.
                 </p>
-                <Button onClick={handleCreateEvent} size="lg" className="gradient-primary hover:opacity-90 shadow-lg shadow-purple-500/30 h-12 px-6">
+                <Button onClick={handleCreateEvent} size="lg" className="gradient-primary hover:opacity-90 shadow-primary h-12 px-6">
                   <Plus className="mr-2 h-5 w-5" />
                   Create Your First Event
                 </Button>
@@ -249,7 +249,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                       <CardTitle className="line-clamp-1 text-xl">{event.name}</CardTitle>
                       <div className="space-y-2 text-gray-600">
                         <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-purple-500" />
+                          <Calendar className="h-4 w-4 text-primary-500" />
                           <span className="text-sm">
                             {formatDate(event.startDate)}
                             {event.endDate && ` - ${formatDate(event.endDate)}`}
@@ -257,7 +257,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                         </div>
                         {event.location && (
                           <div className="flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-pink-500" />
+                            <MapPin className="h-4 w-4 text-cyan-500" />
                             <span className="text-sm line-clamp-1">{event.location}</span>
                           </div>
                         )}
@@ -273,7 +273,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                       <div className="flex gap-2">
                         <Button 
                           onClick={() => handleSelectEvent(event.id)}
-                          className="flex-1 gradient-primary hover:opacity-90 shadow-md shadow-purple-500/30"
+                          className="flex-1 gradient-primary hover:opacity-90 shadow-primary-sm"
                         >
                           Manage
                           <ArrowRight className="ml-2 h-4 w-4" />
@@ -282,7 +282,7 @@ export function EventSelection({ onEventSelected, onLogout }: EventSelectionProp
                           onClick={() => handleEditEvent(event)}
                           variant="outline"
                           size="icon"
-                          className="border-gray-300 hover:border-purple-500 hover:text-purple-600"
+                          className="border-neutral-300 hover:border-primary-500 hover:text-primary-600"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>

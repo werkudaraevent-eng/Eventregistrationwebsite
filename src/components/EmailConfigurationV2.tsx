@@ -618,12 +618,17 @@ export function EmailConfigurationV2() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-3xl font-bold">Email Configurations</h2>
-          <p className="text-muted-foreground">Manage multiple email providers</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
+            <Settings className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Email Configurations</h2>
+            <p className="text-sm text-gray-600 mt-1">Manage multiple email providers</p>
+          </div>
         </div>
-        <Button onClick={createNewConfig} className="bg-gradient-to-r from-purple-600 to-pink-600">
+        <Button onClick={createNewConfig} className="gradient-primary hover:opacity-90 text-white shadow-primary">
           <Plus className="h-4 w-4 mr-2" />
           New Configuration
         </Button>
@@ -654,7 +659,7 @@ export function EmailConfigurationV2() {
                 className={`border rounded-lg p-4 transition-all ${
                   config.is_active 
                     ? 'border-green-500 bg-green-50' 
-                    : 'border-gray-200 hover:border-purple-300'
+                    : 'border-gray-200 hover:border-primary-300'
                 }`}
               >
                 <div className="flex items-start justify-between">
@@ -768,7 +773,7 @@ export function EmailConfigurationV2() {
               <Button 
                 onClick={() => testEmailConfig(selectedConfig)} 
                 disabled={testing}
-                className="bg-gradient-to-r from-purple-600 to-pink-600"
+                className="gradient-primary"
               >
                 {testing ? 'Sending...' : 'Send Test Email'}
               </Button>
@@ -865,7 +870,7 @@ export function EmailConfigurationV2() {
             <Button 
               onClick={() => editingConfig && saveConfig(editingConfig)}
               disabled={saving}
-              className="bg-gradient-to-r from-purple-600 to-pink-600"
+              className="gradient-primary"
             >
               {saving ? 'Saving...' : (editingConfig?.id ? 'Update' : 'Create')}
             </Button>

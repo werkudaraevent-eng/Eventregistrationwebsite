@@ -54,11 +54,11 @@ export function DedicatedAdminLogin({ onAuthenticated, onBackToHome }: Dedicated
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       {/* Modern Gradient Background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-primary-50 via-sky-50 to-cyan-50"></div>
       
       {/* Animated Gradient Orbs */}
-      <div className="absolute top-0 left-0 w-96 h-96 bg-gradient-to-br from-violet-400/30 to-purple-400/30 rounded-full blur-3xl animate-pulse"></div>
-      <div className="absolute bottom-0 right-0 w-96 h-96 bg-gradient-to-br from-pink-400/30 to-purple-400/30 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
+      <div className="absolute top-0 left-0 w-96 h-96 bg-gradient-to-br from-primary-400/30 to-cyan-400/30 rounded-full blur-3xl animate-pulse"></div>
+      <div className="absolute bottom-0 right-0 w-96 h-96 bg-gradient-to-br from-cyan-400/30 to-primary-400/30 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }}></div>
 
       <div className="w-full max-w-md relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
         {/* Back to Home Link */}
@@ -78,7 +78,7 @@ export function DedicatedAdminLogin({ onAuthenticated, onBackToHome }: Dedicated
             {/* Logo/Icon - Modern Gradient Style */}
             <div className="flex justify-center">
               <div className="relative">
-                <div className="w-20 h-20 gradient-primary rounded-3xl flex items-center justify-center shadow-lg shadow-purple-500/30">
+                <div className="w-20 h-20 gradient-primary rounded-3xl flex items-center justify-center shadow-lg shadow-primary/30">
                   <Shield className="h-10 w-10 text-white" />
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-gradient-to-br from-emerald-400 to-emerald-500 rounded-full border-4 border-white flex items-center justify-center shadow-md">
@@ -88,7 +88,7 @@ export function DedicatedAdminLogin({ onAuthenticated, onBackToHome }: Dedicated
             </div>
             
             <div className="text-center space-y-2">
-              <CardTitle className="text-3xl bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">Admin Portal</CardTitle>
+              <CardTitle className="text-3xl font-bold text-primary-700">Admin Portal</CardTitle>
               <CardDescription className="text-base text-gray-600">
                 Sign in to manage events and registrations
               </CardDescription>
@@ -140,7 +140,7 @@ export function DedicatedAdminLogin({ onAuthenticated, onBackToHome }: Dedicated
 
               <Button 
                 type="submit" 
-                className="w-full h-12 text-base gradient-primary hover:opacity-90 shadow-lg shadow-purple-500/30 transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/40" 
+                className="w-full h-12 text-base gradient-primary hover:opacity-90 shadow-lg shadow-primary/30 transition-all duration-300 hover:shadow-xl hover:shadow-primary/40" 
                 disabled={isLoading}
               >
                 {isLoading ? (
@@ -159,8 +159,8 @@ export function DedicatedAdminLogin({ onAuthenticated, onBackToHome }: Dedicated
           </CardContent>
 
           <CardFooter className="flex flex-col space-y-4 border-t pt-6">
-            <div className="w-full p-4 gradient-primary-soft border border-purple-200 rounded-xl">
-              <p className="text-sm text-purple-900 text-center">
+            <div className="w-full p-4 gradient-primary-soft border border-primary-200 rounded-xl">
+              <p className="text-sm text-primary-900 text-center">
                 <span className="font-semibold">First time?</span> Contact your system administrator to set up your account.
               </p>
             </div>

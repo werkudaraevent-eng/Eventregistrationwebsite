@@ -180,13 +180,13 @@ export default function CreateCampaignWizard({ open, onClose, eventId, onSuccess
                   onClick={() => setChannel('email')}
                   className={`p-6 border-2 rounded-lg transition-all ${
                     channel === 'email'
-                      ? 'border-purple-600 bg-purple-50'
+                      ? 'border-primary-600 bg-primary-50'
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
                   <div className="flex flex-col items-center text-center space-y-3">
                     <div className={`p-3 rounded-full ${
-                      channel === 'email' ? 'bg-purple-600' : 'bg-gray-200'
+                      channel === 'email' ? 'bg-primary-600' : 'bg-gray-200'
                     }`}>
                       <Mail className={`h-8 w-8 ${channel === 'email' ? 'text-white' : 'text-gray-600'}`} />
                     </div>
