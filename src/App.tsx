@@ -7,6 +7,7 @@ import { PublicRegistrationForm } from './components/PublicRegistrationForm';
 import { BadgeDesigner } from './components/BadgeDesigner';
 import { Toaster } from './components/ui/sonner';
 import { supabase } from './utils/supabase/client';
+import { PermissionProvider } from './utils/PermissionContext';
 
 export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -197,21 +198,27 @@ export default function App() {
     // If event is selected, show event dashboard
     if (selectedEventId) {
       return (
-        <AdminDashboard 
-          eventId={selectedEventId}
-          accessToken={accessToken} 
-          onLogout={handleLogout}
-          onBackToEvents={handleBackToEvents}
-        />
+        <PermissionProvider>
+          <AdminDashboard 
+            eventId={selectedEventId}
+            accessToken={accessToken} 
+            onLogout={handleLogout}
+            onBackToEvents={handleBackToEvents}
+          />
+          <Toaster position="top-right" richColors />
+        </PermissionProvider>
       );
     }
     
     // Otherwise show event selection
     return (
-      <EventSelection 
-        onEventSelected={handleEventSelected}
-        onLogout={handleLogout}
-      />
+      <PermissionProvider>
+        <EventSelection 
+          onEventSelected={handleEventSelected}
+          onLogout={handleLogout}
+        />
+        <Toaster position="top-right" richColors />
+      </PermissionProvider>
     );
   }
 

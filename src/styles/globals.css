@@ -532,3 +532,12 @@ html {
     color: var(--info-dark);
   }
 }
+
+
+/* Badge Designer - Hide resize handles using data attribute */
+@layer utilities {
+  .resize-handle,
+  [data-resize-handle="true"] {
+    display: none !important;
+  }
+}

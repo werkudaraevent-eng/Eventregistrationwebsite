@@ -73,7 +73,7 @@ export function getPrintableArea(config: PaperSizeConfiguration): { width: numbe
  * Validate custom dimensions are within acceptable range
  */
 export function validateCustomDimensions(width: number, height: number): { valid: boolean; error?: string } {
-  const MIN_SIZE = 50; // mm
+  const MIN_SIZE = 30; // mm (reduced for thermal receipt printers)
   const MAX_SIZE = 500; // mm
 
   if (width < MIN_SIZE || width > MAX_SIZE) {

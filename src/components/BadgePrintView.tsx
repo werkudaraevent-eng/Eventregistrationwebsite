@@ -34,6 +34,7 @@ interface BadgeComponent {
   textAlign?: 'left' | 'center' | 'right';
   color?: string;
   customText?: string;
+  rotation?: number;
 }
 
 interface BadgePrintViewProps {
@@ -94,12 +95,21 @@ export function BadgePrintView({ participants, badgeTemplate, eventName }: Badge
   const renderComponentContent = (component: BadgeComponent, participant: Participant) => {
     if (!component.enabled) return null;
 
-    const style: React.CSSProperties = {
+    const rotation = component.rotation || 0;
+    const isRotated90or270 = rotation === 90 || rotation === 270;
+    
+    // Container style - no rotation, just positioning
+    const containerStyle: React.CSSProperties = {
       position: 'absolute',
       left: `${component.x}%`,
       top: `${component.y}%`,
       width: `${component.width}%`,
       height: `${component.height}%`,
+      overflow: 'hidden'
+    };
+    
+    // Content style with rotation applied inside
+    const contentStyle: React.CSSProperties = {
       fontSize: `${component.fontSize || 16}px`,
       fontFamily: component.fontFamily || 'sans-serif',
       fontWeight: component.fontWeight || 'normal',
@@ -110,14 +120,31 @@ export function BadgePrintView({ participants, badgeTemplate, eventName }: Badge
       alignItems: 'center',
       justifyContent: component.textAlign === 'left' ? 'flex-start' : 
                       component.textAlign === 'right' ? 'flex-end' : 'center',
-      overflow: 'hidden'
+      whiteSpace: 'nowrap',
+      ...(rotation !== 0 ? {
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        transform: `translate(-50%, -50%) rotate(${rotation}deg)`,
+        // For 90/270, the content width should match container height and vice versa
+        width: isRotated90or270 ? `${(component.height / component.width) * 100}%` : '100%',
+        height: isRotated90or270 ? `${(component.width / component.height) * 100}%` : '100%'
+      } : {
+        width: '100%',
+        height: '100%'
+      })
     };
+    
+    // Use containerStyle for outer div, contentStyle for inner content
+    const style = containerStyle;
 
     switch (component.type) {
       case 'eventName':
         return (
           <div key={component.id} style={style}>
-            {component.customText || eventName}
+            <div style={contentStyle}>
+              {component.customText || eventName}
+            </div>
           </div>
         );
 
@@ -126,7 +153,9 @@ export function BadgePrintView({ participants, badgeTemplate, eventName }: Badge
           (participant as any)[component.fieldName] || '' : '';
         return (
           <div key={component.id} style={style}>
-            {fieldValue}
+            <div style={contentStyle}>
+              {fieldValue}
+            </div>
           </div>
         );
 
@@ -155,7 +184,9 @@ export function BadgePrintView({ participants, badgeTemplate, eventName }: Badge
       case 'customText':
         return (
           <div key={component.id} style={style}>
-            {component.customText || ''}
+            <div style={contentStyle}>
+              {component.customText || ''}
+            </div>
           </div>
         );
 

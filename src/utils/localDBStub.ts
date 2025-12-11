@@ -92,7 +92,7 @@ export interface BrandingSettings {
 }
 
 export interface PaperSizeConfiguration {
-  sizeType: 'CR80' | 'A4' | 'A5' | 'A6' | 'A7' | 'Letter' | 'B1' | 'B2' | 'B3' | 'B4' | 'A1_ID' | 'A2_ID' | 'A3_ID' | 'Custom';
+  sizeType: 'CR80' | 'A4' | 'A5' | 'A6' | 'A7' | 'Letter' | 'B1' | 'B2' | 'B3' | 'B4' | 'A1_ID' | 'A2_ID' | 'A3_ID' | 'THERMAL_80' | 'THERMAL_80_LONG' | 'THERMAL_80_SHORT' | 'THERMAL_58' | 'Custom';
   orientation: 'portrait' | 'landscape';
   customWidth?: number;  // in mm
   customHeight?: number; // in mm
@@ -102,6 +102,7 @@ export interface PaperSizeConfiguration {
     bottom: number; // in mm
     left: number;   // in mm
   };
+  printRotation?: 0 | 90; // Rotate badge output when printing (0° = no rotation, 90° = rotate clockwise)
 }
 
 export interface BadgeSettings {
@@ -145,6 +146,11 @@ export const PAPER_SIZES = {
   A1_ID: { width: 55, height: 90, label: 'A1 ID (55×90mm)' },
   A2_ID: { width: 65, height: 95, label: 'A2 ID (65×95mm)' },
   A3_ID: { width: 80, height: 100, label: 'A3 ID (80×100mm)' },
+  // Thermal Receipt Printer Sizes (POS Printers like Epson TM-T82X)
+  THERMAL_80: { width: 72, height: 100, label: 'Thermal 80mm (72×100mm)' },
+  THERMAL_80_LONG: { width: 72, height: 150, label: 'Thermal 80mm Long (72×150mm)' },
+  THERMAL_80_SHORT: { width: 72, height: 60, label: 'Thermal 80mm Short (72×60mm)' },
+  THERMAL_58: { width: 48, height: 80, label: 'Thermal 58mm (48×80mm)' },
   Custom: { width: 100, height: 150, label: 'Custom Size' }
 } as const;
 
@@ -159,6 +165,44 @@ export const DEFAULT_PRINT_CONFIG: PaperSizeConfiguration = {
     left: 10
   }
 };
+
+// Thermal printer preset (for POS printers like Epson TM-T82X)
+// Thermal printers have minimal hardware margins, so software margins should be small
+export const THERMAL_PRINT_CONFIG: PaperSizeConfiguration = {
+  sizeType: 'THERMAL_80',
+  orientation: 'portrait',
+  margins: {
+    top: 2,
+    right: 0,
+    bottom: 2,
+    left: 0
+  }
+};
+
+// Helper to get recommended margins for paper size type
+// Optional customWidth parameter to detect small paper sizes
+export function getRecommendedMargins(
+  sizeType: PaperSizeConfiguration['sizeType'],
+  customWidth?: number
+): PaperSizeConfiguration['margins'] {
+  // Thermal printers have hardware margins, so minimal software margins needed
+  if (sizeType.startsWith('THERMAL_')) {
+    return { top: 2, right: 0, bottom: 2, left: 0 };
+  }
+  // ID cards typically need minimal margins
+  if (['CR80', 'B1', 'B2', 'B3', 'B4', 'A1_ID', 'A2_ID', 'A3_ID'].includes(sizeType)) {
+    return { top: 2, right: 2, bottom: 2, left: 2 };
+  }
+  // Custom size - use minimal margins for small sizes (< 100mm width)
+  if (sizeType === 'Custom') {
+    if (customWidth && customWidth < 100) {
+      return { top: 2, right: 2, bottom: 2, left: 2 };
+    }
+    return { top: 5, right: 5, bottom: 5, left: 5 };
+  }
+  // Standard paper sizes (A4, A5, Letter, etc.)
+  return { top: 10, right: 10, bottom: 10, left: 10 };
+}
 
 // Stub functions - TODO: Replace with Supabase queries
 const localDB = {

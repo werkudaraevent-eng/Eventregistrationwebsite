@@ -9,30 +9,53 @@
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
-import { PAPER_SIZES, type PaperSizeConfiguration } from '../utils/localDBStub';
+import { PAPER_SIZES, getRecommendedMargins, type PaperSizeConfiguration } from '../utils/localDBStub';
 import { validateCustomDimensions } from '../utils/printUtils';
 
 interface PaperSizeSelectorProps {
   configuration: PaperSizeConfiguration;
   onConfigurationChange: (config: Partial<PaperSizeConfiguration>) => void;
+  autoApplyMargins?: boolean; // Auto-apply recommended margins when paper size changes
 }
 
 // Group paper sizes by category (no landscape/portrait distinction - user can toggle orientation)
 const SIZE_GROUPS = {
   'Standard Paper': ['A4', 'A5', 'A6', 'A7', 'Letter'],
   'ID Card Sizes': ['CR80', 'B1', 'B2', 'B3', 'B4', 'A1_ID', 'A2_ID', 'A3_ID'],
+  'Thermal Receipt (POS)': ['THERMAL_80', 'THERMAL_80_LONG', 'THERMAL_80_SHORT', 'THERMAL_58'],
   'Custom': ['Custom']
 };
 
-export function PaperSizeSelector({ configuration, onConfigurationChange }: PaperSizeSelectorProps) {
+export function PaperSizeSelector({ configuration, onConfigurationChange, autoApplyMargins = true }: PaperSizeSelectorProps) {
   const handleSizeTypeChange = (sizeType: string) => {
-    onConfigurationChange({ sizeType: sizeType as PaperSizeConfiguration['sizeType'] });
+    const newSizeType = sizeType as PaperSizeConfiguration['sizeType'];
+    
+    // Auto-apply recommended margins for the selected paper size
+    if (autoApplyMargins) {
+      // For Custom, use current customWidth or default 100mm
+      const customWidth = newSizeType === 'Custom' 
+        ? (configuration.customWidth || 100) 
+        : undefined;
+      const recommendedMargins = getRecommendedMargins(newSizeType, customWidth);
+      onConfigurationChange({ 
+        sizeType: newSizeType,
+        margins: recommendedMargins
+      });
+    } else {
+      onConfigurationChange({ sizeType: newSizeType });
+    }
   };
 
   const handleCustomWidthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseFloat(e.target.value);
     if (!isNaN(value)) {
-      onConfigurationChange({ customWidth: value });
+      // Auto-apply recommended margins based on custom width
+      if (autoApplyMargins) {
+        const recommendedMargins = getRecommendedMargins('Custom', value);
+        onConfigurationChange({ customWidth: value, margins: recommendedMargins });
+      } else {
+        onConfigurationChange({ customWidth: value });
+      }
     }
   };
 
@@ -61,7 +84,7 @@ export function PaperSizeSelector({ configuration, onConfigurationChange }: Pape
           <SelectTrigger className="h-8 text-xs">
             <SelectValue placeholder="Select paper size" />
           </SelectTrigger>
-          <SelectContent className="max-h-[300px]">
+          <SelectContent className="max-h-[250px] overflow-y-auto z-[9999]">
             {Object.entries(SIZE_GROUPS).map(([groupName, sizes]) => (
               <SelectGroup key={groupName}>
                 <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase tracking-wider">
@@ -99,7 +122,7 @@ export function PaperSizeSelector({ configuration, onConfigurationChange }: Pape
               <Input
                 id="custom-width"
                 type="number"
-                min={50}
+                min={30}
                 max={500}
                 step={0.1}
                 value={configuration.customWidth || 100}
@@ -119,7 +142,7 @@ export function PaperSizeSelector({ configuration, onConfigurationChange }: Pape
               <Input
                 id="custom-height"
                 type="number"
-                min={50}
+                min={30}
                 max={500}
                 step={0.1}
                 value={configuration.customHeight || 150}
@@ -155,7 +178,7 @@ export function PaperSizeSelector({ configuration, onConfigurationChange }: Pape
           )}
 
           <div className="text-[10px] text-slate-500 bg-slate-50 rounded p-2 border border-slate-200">
-            Range: 50mm - 500mm
+            Range: 30mm - 500mm
           </div>
         </div>
       )}

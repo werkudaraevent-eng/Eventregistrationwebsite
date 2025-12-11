@@ -1,26 +1,27 @@
 /**
  * BadgeDesigner - Advanced Drag-and-Drop Badge Customization Interface
  * 
- * Features:
- * - Visual drag-and-drop canvas with live preview
- * - Component palette for dragging elements onto the badge
- * - Resizable and movable components on canvas
- * - Context-aware styling panel for selected components
- * - Real-time visual feedback
+ * REDESIGNED UI LAYOUT:
+ * - Top Toolbar: Badge size, orientation, zoom, undo/redo, Export button
+ * - Left Rail (64px): Icon-based component palette with tooltips
+ * - Center Canvas: Maximized design area
+ * - Right Panel: Context-aware component properties
+ * - Export Modal: Print settings separated from design view
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { Resizable } from 're-resizable';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-// RadioGroup removed - using Select dropdown instead
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from './ui/select';
 import { Switch } from './ui/switch';
 import { 
   Save, QrCode, Image as ImageIcon, Type, CheckCircle2, 
   Plus, Trash2, AlignLeft, AlignCenter, AlignRight,
-  Bold, Italic, Upload, Minus, Undo2, Redo2, MousePointer2, FileText, Printer, CreditCard
+  Bold, Italic, Minus, Undo2, Redo2, MousePointer2, 
+  RotateCw, Download, ChevronDown,
+  Calendar, User, Mail, Phone, Building, Briefcase,
+  FileText, FolderOpen, Copy, LayoutTemplate, Pencil
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import {
@@ -33,15 +34,29 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from './ui/alert-dialog';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './ui/accordion';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from './ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import QRCodeLib from 'qrcode';
-import localDB from '../utils/localDBStub';
+// localDB import removed - now using Supabase exclusively
 import { supabase } from '../utils/supabase/client';
 import type { BadgeSettings, Event, PaperSizeConfiguration } from '../utils/localDBStub';
-import { DEFAULT_PRINT_CONFIG, PAPER_SIZES as PRINT_PAPER_SIZES } from '../utils/localDBStub';
+import { DEFAULT_PRINT_CONFIG } from '../utils/localDBStub';
 import { BadgePrintSettings } from './BadgePrintSettings';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { saveBadgeTemplate, loadBadgeTemplates, deleteBadgeTemplate, type BadgeTemplate } from './BadgeTemplateSelector';
+import { ResizableTextComponent } from './ResizableTextComponent';
+import { toast } from 'sonner';
+
 
 interface BadgeDesignerProps {
   eventId: string;
@@ -56,12 +71,10 @@ interface CanvasComponent {
   label?: string;
   enabled: boolean;
   order: number;
-  // Canvas positioning (percentage-based)
   x: number;
   y: number;
   width: number;
   height: number;
-  // Component-specific styling
   fontSize?: number;
   fontFamily?: string;
   fontWeight?: 'normal' | 'bold';
@@ -69,44 +82,230 @@ interface CanvasComponent {
   textAlign?: 'left' | 'center' | 'right';
   color?: string;
   customText?: string;
+  rotation?: number;
 }
 
 // Badge size dimensions in mm
-// Standard ID Card sizes based on Indonesian market (Ukuran Dalam / Inner Size)
 const BADGE_SIZES = {
   CR80: { width: 85.6, height: 53.98, label: 'CR80 (Credit Card)' },
-  // Indonesian ID Card Holder Sizes (B Series - Landscape)
   B1: { width: 85, height: 55, label: 'B1 (85x55mm)' },
   B2: { width: 105, height: 65, label: 'B2 (105x65mm)' },
   B3: { width: 105, height: 80, label: 'B3 (105x80mm)' },
   B4: { width: 130, height: 90, label: 'B4 (130x90mm)' },
-  // Indonesian ID Card Holder Sizes (A Series - Portrait)
   A1: { width: 55, height: 90, label: 'A1 (55x90mm)' },
   A2: { width: 65, height: 95, label: 'A2 (65x95mm)' },
   A3: { width: 80, height: 100, label: 'A3 (80x100mm)' },
-  // Paper sizes
   A6: { width: 105, height: 148, label: 'A6 Paper' },
   A7: { width: 74, height: 105, label: 'A7 Paper' },
   custom: { width: 100, height: 150, label: 'Custom Size' }
 };
 
-const CANVAS_SCALE = 3.5; // Pixel scale factor for better visibility
+const CANVAS_SCALE = 3.5;
 
-// Utility function for color readability
+// Preserve the original color - don't convert white to black
+// Users may intentionally use white text on dark backgrounds
 const ensureReadableColor = (value?: string): string => {
   if (!value) return '#000000';
-  const normalized = value.trim().toLowerCase();
-  if (normalized === '#fff' || normalized === '#ffffff' || normalized === 'white') {
-    return '#000000';
-  }
   return value;
 };
 
-export function BadgeDesigner({ eventId, onClose }: BadgeDesignerProps) {
-  return <BadgeDesignerContent eventId={eventId} onClose={onClose} />;
+/**
+ * AABB (Axis-Aligned Bounding Box) Utilities for Rotated Elements
+ * 
+ * These functions calculate the actual visual footprint of rotated elements
+ * for accurate boundary/collision detection.
+ */
+
+interface BoundingBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
 }
 
-function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
+/**
+ * Calculate the Axis-Aligned Bounding Box (AABB) of a rotated rectangle.
+ * Returns the visual bounds after rotation.
+ */
+function getRotatedBoundingBox(
+  centerX: number,
+  centerY: number,
+  width: number,
+  height: number,
+  angleDeg: number
+): BoundingBox {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  
+  const halfW = width / 2;
+  const halfH = height / 2;
+  
+  // 4 corners in local space (relative to center)
+  const corners = [
+    { x: -halfW, y: -halfH },
+    { x: halfW, y: -halfH },
+    { x: halfW, y: halfH },
+    { x: -halfW, y: halfH },
+  ];
+  
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  
+  for (const corner of corners) {
+    const rotatedX = corner.x * cos - corner.y * sin;
+    const rotatedY = corner.x * sin + corner.y * cos;
+    const globalX = centerX + rotatedX;
+    const globalY = centerY + rotatedY;
+    minX = Math.min(minX, globalX);
+    maxX = Math.max(maxX, globalX);
+    minY = Math.min(minY, globalY);
+    maxY = Math.max(maxY, globalY);
+  }
+  
+  return { left: minX, right: maxX, top: minY, bottom: maxY };
+}
+
+/**
+ * Constrain a rotated element to stay within canvas bounds using AABB.
+ * Returns adjusted center coordinates.
+ */
+function constrainRotatedToCanvas(
+  proposedCenterX: number,
+  proposedCenterY: number,
+  width: number,
+  height: number,
+  angleDeg: number,
+  canvasWidth: number = 100,
+  canvasHeight: number = 100
+): { x: number; y: number } {
+  const aabb = getRotatedBoundingBox(proposedCenterX, proposedCenterY, width, height, angleDeg);
+  
+  let dx = 0, dy = 0;
+  
+  if (aabb.left < 0) dx = -aabb.left;
+  else if (aabb.right > canvasWidth) dx = canvasWidth - aabb.right;
+  
+  if (aabb.top < 0) dy = -aabb.top;
+  else if (aabb.bottom > canvasHeight) dy = canvasHeight - aabb.bottom;
+  
+  return {
+    x: proposedCenterX + dx,
+    y: proposedCenterY + dy,
+  };
+}
+
+type HandlePosition = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+const HANDLE_SIZE = 8;
+const MIN_WIDTH_PERCENT = 5;
+const MIN_HEIGHT_PERCENT = 3;
+
+/**
+ * ANCHOR & MOUSE MIDPOINT RESIZE ALGORITHM
+ * Guarantees the anchor stays PERFECTLY fixed during resize.
+ */
+interface ResizeResult {
+  newWidth: number;
+  newHeight: number;
+  newCenterX: number;
+  newCenterY: number;
+}
+
+function calculateAnchorBasedResize(
+  mouseGlobalX: number,
+  mouseGlobalY: number,
+  centerX: number,
+  centerY: number,
+  currentWidth: number,
+  currentHeight: number,
+  angleDeg: number,
+  handle: HandlePosition,
+  minWidth: number,
+  minHeight: number
+): ResizeResult {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  
+  const halfW = currentWidth / 2;
+  const halfH = currentHeight / 2;
+
+  const controlsWidth = ['e', 'w', 'ne', 'nw', 'se', 'sw'].includes(handle);
+  const controlsHeight = ['n', 's', 'ne', 'nw', 'se', 'sw'].includes(handle);
+  const isRightSide = ['e', 'ne', 'se'].includes(handle);
+  const isBottomSide = ['s', 'se', 'sw'].includes(handle);
+
+  // STEP 1: Calculate ANCHOR point in GLOBAL space (opposite to handle)
+  const anchorLocalX = controlsWidth ? (isRightSide ? -halfW : halfW) : 0;
+  const anchorLocalY = controlsHeight ? (isBottomSide ? -halfH : halfH) : 0;
+  const Ax = centerX + (anchorLocalX * cos - anchorLocalY * sin);
+  const Ay = centerY + (anchorLocalX * sin + anchorLocalY * cos);
+
+  // STEP 2: Project mouse onto element's local axis
+  const mouseRelX = mouseGlobalX - Ax;
+  const mouseRelY = mouseGlobalY - Ay;
+  const mouseLocalX = mouseRelX * cos + mouseRelY * sin;
+  const mouseLocalY = -mouseRelX * sin + mouseRelY * cos;
+  
+  // Strict axis locking
+  let projectedLocalX = controlsWidth ? mouseLocalX : 0;
+  let projectedLocalY = controlsHeight ? mouseLocalY : 0;
+  
+  // Enforce minimum dimensions
+  if (controlsWidth) {
+    if (isRightSide && projectedLocalX < minWidth) projectedLocalX = minWidth;
+    if (!isRightSide && projectedLocalX > -minWidth) projectedLocalX = -minWidth;
+  }
+  if (controlsHeight) {
+    if (isBottomSide && projectedLocalY < minHeight) projectedLocalY = minHeight;
+    if (!isBottomSide && projectedLocalY > -minHeight) projectedLocalY = -minHeight;
+  }
+  
+  // Rotate back to global space
+  const activeEdgeX = Ax + (projectedLocalX * cos - projectedLocalY * (-sin));
+  const activeEdgeY = Ay + (projectedLocalX * sin + projectedLocalY * cos);
+
+  // STEP 3: New center = midpoint between anchor and active edge
+  const newCenterX = (Ax + activeEdgeX) / 2;
+  const newCenterY = (Ay + activeEdgeY) / 2;
+
+  // STEP 4: Calculate new dimensions
+  let newWidth = currentWidth;
+  let newHeight = currentHeight;
+  
+  if (controlsWidth) newWidth = Math.abs(projectedLocalX);
+  if (controlsHeight) newHeight = Math.abs(projectedLocalY);
+
+  return { newWidth, newHeight, newCenterX, newCenterY };
+}
+
+/**
+ * Dynamic cursor based on handle position and element rotation
+ */
+const HANDLE_BASE_ANGLES: Record<HandlePosition, number> = {
+  n: 0, ne: 45, e: 90, se: 135, s: 180, sw: 225, w: 270, nw: 315,
+};
+
+const ANGLE_TO_CURSOR = [
+  'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize',
+  'ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize',
+];
+
+function getCursorForHandle(handle: HandlePosition, rotationDeg: number): string {
+  const baseAngle = HANDLE_BASE_ANGLES[handle];
+  let effectiveAngle = (baseAngle + rotationDeg) % 360;
+  if (effectiveAngle < 0) effectiveAngle += 360;
+  const index = Math.floor(((effectiveAngle + 22.5) % 360) / 45);
+  return ANGLE_TO_CURSOR[index];
+}
+
+export function BadgeDesigner({ eventId }: BadgeDesignerProps) {
+  return <BadgeDesignerContent eventId={eventId} />;
+}
+
+
+function BadgeDesignerContent({ eventId }: BadgeDesignerProps) {
   const [settings, setSettings] = useState<BadgeSettings | null>(null);
   const [event, setEvent] = useState<Event | null>(null);
   const [availableFields, setAvailableFields] = useState<Array<{ name: string; label: string }>>([]);
@@ -117,11 +316,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isAutoZoom, setIsAutoZoom] = useState(true);
-  const [showPrintPreview, setShowPrintPreview] = useState(false);
   const [printConfiguration, setPrintConfiguration] = useState<PaperSizeConfiguration>(DEFAULT_PRINT_CONFIG);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [componentToDelete, setComponentToDelete] = useState<string | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [fieldsExpanded, setFieldsExpanded] = useState(false);
   const previewContainerRef = useRef<HTMLDivElement>(null);
   
   // Template management
@@ -132,26 +332,17 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const [newTemplateName, setNewTemplateName] = useState('');
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const [showTemplatesModal, setShowTemplatesModal] = useState(false);
+  const [showNewDesignConfirm, setShowNewDesignConfirm] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  
+  // Track last saved state to detect actual changes (prevents false positives on load)
+  const lastSavedStateRef = useRef<string>('');
   
   // Undo/Redo history
   const [history, setHistory] = useState<CanvasComponent[][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const maxHistoryLength = 50;
-
-  const handleClose = () => {
-    if (onClose) {
-      onClose();
-    } else {
-      window.history.back();
-    }
-  };
-
-  useEffect(() => {
-    if (eventId) {
-      loadSettings();
-      loadEvent();
-    }
-  }, [eventId]);
 
   const normalizeComponent = (component: any): CanvasComponent => ({
     ...component,
@@ -163,74 +354,24 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     color: ensureReadableColor(component.color)
   });
 
-  const loadSettings = () => {
-    const storedSettings = localDB.getBadgeSettings(eventId);
-    const normalizedSettings = {
-      ...storedSettings,
-      backgroundColor: storedSettings.backgroundColor || '#f3f4f6'
-    };
-    setSettings(normalizedSettings);
-    
-    // Load print configuration if exists
-    if (storedSettings.printConfiguration) {
-      setPrintConfiguration(storedSettings.printConfiguration);
-    }
-    
-    const canvasLayoutStr = localStorage.getItem(`badge_canvas_${eventId}`);
-    
-    if (canvasLayoutStr) {
-      try {
-        const savedLayout = JSON.parse(canvasLayoutStr);
-        setCanvasComponents(savedLayout.map((component: CanvasComponent) => normalizeComponent(component)));
-      } catch (err) {
-        console.error('Error loading canvas layout:', err);
-        convertOldComponents(normalizedSettings);
-      }
-    } else {
-      convertOldComponents(normalizedSettings);
-    }
-  };
 
-  const convertOldComponents = (badgeSettings: any) => {
-    if (badgeSettings.components) {
-      const converted = badgeSettings.components.map((c: any, index: number) => ({
-        ...c,
-        x: 10,
-        y: 10 + index * 15,
-        width: c.type === 'qrcode' ? 25 : 80,
-        height: c.type === 'qrcode' ? 25 : 10,
-        fontSize: 16,
-        fontFamily: 'sans-serif',
-        fontWeight: 'normal' as const,
-        fontStyle: 'normal' as const,
-        textAlign: 'center' as const,
-      color: '#000000'
-      })).map(normalizeComponent);
-      setCanvasComponents(converted);
-    }
-  };
+  // Removed loadSettings - now loading exclusively from Supabase in loadEvent
 
-  const loadEvent = async () => {
+
+  const loadEvent = useCallback(async () => {
     try {
-      // Handle both old format (E...) and new format (evt-...)
-      let query = supabase
+      const { data, error } = await supabase
         .from('events')
         .select('*')
-        .eq('id', eventId);
-
-      const { data, error } = await query.single();
+        .eq('id', eventId)
+        .single();
 
       if (error) {
-        // If event not found, try searching in other fields as fallback
-        console.warn('Event not found by ID, searching by legacy ID...');
-        
-        // For now, just log the error
         console.error('Error loading event:', error);
         return;
       }
 
       if (data) {
-        // Convert database format to component format
         const eventData: Event = {
           id: data.id,
           name: data.name,
@@ -252,8 +393,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           { name: 'position', label: 'Position' }
         ];
         
-        // Load custom fields from event definition (try both camelCase and snake_case)
-        // Create a map of field ID to label for quick lookup
         const eventCustomFields = data.customFields || data.custom_fields || [];
         const fieldIdToLabel = new Map<string, string>();
         eventCustomFields.forEach((cf: any) => {
@@ -265,8 +404,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           label: cf.label
         }));
         
-        // Also check participants' customData for any fields that might have data
-        // but use the label from event definition
         try {
           const { data: participantsData } = await supabase
             .from('participants')
@@ -276,7 +413,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           
           const customFieldsFromParticipants: Array<{ name: string; label: string }> = [];
           const existingFieldNames = new Set([
-            ...standardFields.map((f: { name: string; label: string }) => f.name),
+            ...standardFields.map((f) => f.name),
             ...customFieldsFromEvent.map((f: { name: string; label: string }) => f.name)
           ]);
           
@@ -285,16 +422,9 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
               if (p.customData && typeof p.customData === 'object') {
                 Object.keys(p.customData).forEach(key => {
                   if (!existingFieldNames.has(key)) {
-                    // Try to get label from event custom fields definition
-                    // If not found, create a readable label from the key
                     let label = fieldIdToLabel.get(key);
                     if (!label) {
-                      // If key looks like an ID (fld-xxx), try to make it readable
-                      if (key.startsWith('fld-')) {
-                        label = 'Custom Field'; // Fallback for unknown fields
-                      } else {
-                        label = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
-                      }
+                      label = key.startsWith('fld-') ? 'Custom Field' : key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
                     }
                     customFieldsFromParticipants.push({ name: key, label });
                     existingFieldNames.add(key);
@@ -310,13 +440,11 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           setAvailableFields([...standardFields, ...customFieldsFromEvent]);
         }
 
-        // Load badge template if exists
         if (data.badge_template) {
+          // Load from Supabase badge_template
           const template = data.badge_template;
-          
-          // Set as legacy template for editing
-          setCurrentTemplateId('legacy');
-          setCurrentTemplateName(template.name || 'Default Template');
+          setCurrentTemplateId('event');
+          setCurrentTemplateName(template.name || 'Event Badge');
           
           setSettings({
             size: template.size || 'CR80',
@@ -335,26 +463,70 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           if (template.components) {
             setCanvasComponents(template.components.map((c: any) => normalizeComponent(c)));
           }
-          // Load print configuration
           if (template.printConfiguration) {
             setPrintConfiguration(template.printConfiguration);
           }
+          // Set saved state ref to match loaded template (prevents false positive unsaved changes)
+          lastSavedStateRef.current = JSON.stringify({
+            components: template.components || [],
+            backgroundImageUrl: template.backgroundImageUrl || '',
+            logoUrl: template.logoUrl || '',
+            backgroundColor: template.backgroundColor || '#f3f4f6'
+          });
+          console.log('[BadgeDesigner] Loaded badge template from Supabase:', template.name || 'Event Badge');
+        } else {
+          // No badge_template in database - use defaults
+          console.log('[BadgeDesigner] No badge template found, using defaults');
+          setSettings({
+            size: 'CR80',
+            customWidth: 100,
+            customHeight: 150,
+            backgroundColor: '#f3f4f6',
+            backgroundImageUrl: '',
+            backgroundImageFit: 'cover' as any,
+            logoUrl: '',
+            showQR: true,
+            showAttendance: false,
+            textColor: '#000000',
+            accentColor: '#000000',
+            components: []
+          } as any);
+          setCanvasComponents([]);
+          setCurrentTemplateId(null);
+          setCurrentTemplateName('');
+          // Set saved state ref to match default state
+          lastSavedStateRef.current = JSON.stringify({
+            components: [],
+            backgroundImageUrl: '',
+            logoUrl: '',
+            backgroundColor: '#f3f4f6'
+          });
         }
       }
     } catch (error) {
       console.error('Error loading event from Supabase:', error);
     }
-  };
+  }, [eventId]);
 
-  // Load saved templates
+  // Load event data on mount or when eventId changes
+  useEffect(() => {
+    if (eventId) {
+      // Load from Supabase only - loadEvent handles badge_template
+      loadEvent();
+    }
+  }, [eventId, loadEvent]);
+
+
   const loadTemplates = async (autoLoadDefault: boolean = false) => {
     try {
+      console.log('[BadgeDesigner] Loading templates from Supabase for event:', eventId);
       const templates = await loadBadgeTemplates(eventId);
+      console.log('[BadgeDesigner] Loaded templates:', templates.length, templates.map(t => t.name));
       setSavedTemplates(templates);
       
-      // Auto-load default template if requested and no template is currently loaded
       if (autoLoadDefault && templates.length > 0 && !currentTemplateId) {
         const defaultTemplate = templates.find(t => t.is_default) || templates[0];
+        console.log('[BadgeDesigner] Auto-loading default template:', defaultTemplate.name);
         loadTemplateIntoDesigner(defaultTemplate);
       }
     } catch (error) {
@@ -362,8 +534,10 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     }
   };
 
-  // Load template into designer
   const loadTemplateIntoDesigner = (template: BadgeTemplate) => {
+    console.log('[BadgeDesigner] Loading template:', template.name, template.id);
+    console.log('[BadgeDesigner] Template data:', template.template_data);
+    
     const data = template.template_data;
     setCurrentTemplateId(template.id);
     setCurrentTemplateName(template.name);
@@ -384,7 +558,11 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     } as any);
     
     if (data.components) {
+      console.log('[BadgeDesigner] Loading components:', data.components.length);
       setCanvasComponents(data.components.map((c: any) => normalizeComponent(c)));
+    } else {
+      console.log('[BadgeDesigner] No components in template, clearing canvas');
+      setCanvasComponents([]);
     }
     
     if (data.printConfiguration) {
@@ -392,11 +570,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     }
   };
 
-  // Save as new template
   const handleSaveAsTemplate = async () => {
     if (!settings || !newTemplateName.trim()) return;
     
     setIsSavingTemplate(true);
+    const toastId = toast.loading('Saving template...');
+    
     try {
       const templateData = {
         size: settings.size || 'CR80',
@@ -410,12 +589,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         printConfiguration: printConfiguration
       };
 
-      const result = await saveBadgeTemplate(
-        eventId,
-        newTemplateName.trim(),
-        templateData,
-        saveAsDefault
-      );
+      const result = await saveBadgeTemplate(eventId, newTemplateName.trim(), templateData, saveAsDefault);
 
       if (result.success && result.template) {
         setCurrentTemplateId(result.template.id);
@@ -424,33 +598,29 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         setShowSaveTemplateDialog(false);
         setNewTemplateName('');
         setSaveAsDefault(false);
-        alert('Template saved successfully!');
+        toast.success(`Template "${result.template.name}" saved!`, { id: toastId });
       } else {
-        alert('Failed to save template: ' + result.error);
+        toast.error('Failed to save template: ' + result.error, { id: toastId });
       }
     } catch (error) {
       console.error('Error saving template:', error);
-      alert('Failed to save template');
+      toast.error('Failed to save template', { id: toastId });
     } finally {
       setIsSavingTemplate(false);
     }
   };
 
-  // Update existing template
-  const handleUpdateTemplate = async () => {
+  const _handleUpdateTemplate = async () => {
     if (!settings) return;
     
-    // If no currentTemplateId but has currentTemplateName, we need to find the template by name
     let templateIdToUpdate = currentTemplateId;
     
     if (!templateIdToUpdate && currentTemplateName) {
-      // Try to find template by name in savedTemplates
       const matchingTemplate = savedTemplates.find(t => t.name === currentTemplateName);
       if (matchingTemplate) {
         templateIdToUpdate = matchingTemplate.id;
-        setCurrentTemplateId(matchingTemplate.id); // Fix the state
+        setCurrentTemplateId(matchingTemplate.id);
       } else {
-        // No matching template found, prompt to save as new
         alert('Template not found. Please use "Save As New" to create a new template.');
         return;
       }
@@ -475,16 +645,10 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         printConfiguration: printConfiguration
       };
 
-      // If it's a legacy template, save to events.badge_template
       if (templateIdToUpdate === 'legacy') {
         const { error } = await supabase
           .from('events')
-          .update({
-            badge_template: {
-              ...templateData,
-              name: currentTemplateName
-            }
-          })
+          .update({ badge_template: { ...templateData, name: currentTemplateName } })
           .eq('id', eventId);
 
         if (error) {
@@ -494,14 +658,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           setTimeout(() => setSaveSuccess(false), 1500);
         }
       } else {
-        // Update in badge_templates table
-        const result = await saveBadgeTemplate(
-          eventId,
-          currentTemplateName,
-          templateData,
-          false,
-          templateIdToUpdate
-        );
+        const result = await saveBadgeTemplate(eventId, currentTemplateName, templateData, false, templateIdToUpdate);
 
         if (result.success) {
           await loadTemplates();
@@ -518,11 +675,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       setIsSaving(false);
     }
   };
+  void _handleUpdateTemplate;
 
-  // Delete template - reserved for future template management UI
-  const _handleDeleteTemplate = async (templateId: string) => {
+  const handleDeleteTemplate = async (templateId: string) => {
     if (!confirm('Are you sure you want to delete this template?')) return;
     
+    const toastId = toast.loading('Deleting template...');
     try {
       const result = await deleteBadgeTemplate(templateId);
       if (result.success) {
@@ -531,68 +689,171 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           setCurrentTemplateName('');
         }
         await loadTemplates();
+        toast.success('Template deleted', { id: toastId });
       } else {
-        alert('Failed to delete template: ' + result.error);
+        toast.error('Failed to delete template: ' + result.error, { id: toastId });
       }
     } catch (error) {
       console.error('Error deleting template:', error);
+      toast.error('Failed to delete template', { id: toastId });
     }
   };
-  // Export for potential external use
-  void _handleDeleteTemplate;
 
-  // Load templates on mount - with slight delay to allow loadEvent to complete first
+  // Reset canvas to blank state
+  const handleNewDesign = () => {
+    setCanvasComponents([]);
+    setSelectedComponentId(null);
+    setCurrentTemplateId(null);
+    setCurrentTemplateName('');
+    setSettings({
+      ...settings!,
+      backgroundColor: '#f3f4f6',
+      backgroundImageUrl: '',
+      logoUrl: ''
+    });
+    setHistory([]);
+    setHistoryIndex(-1);
+    // Update saved state ref to match new blank state
+    lastSavedStateRef.current = JSON.stringify({
+      components: [],
+      backgroundImageUrl: '',
+      logoUrl: '',
+      backgroundColor: '#f3f4f6'
+    });
+    setHasUnsavedChanges(false);
+    setShowNewDesignConfirm(false);
+  };
+
+  // Track unsaved changes by comparing to last saved state
+  useEffect(() => {
+    const currentState = JSON.stringify({
+      components: canvasComponents,
+      backgroundImageUrl: settings?.backgroundImageUrl,
+      logoUrl: settings?.logoUrl,
+      backgroundColor: settings?.backgroundColor
+    });
+    
+    // Only mark as changed if we have a saved state to compare against
+    // and the current state differs from it
+    if (lastSavedStateRef.current && currentState !== lastSavedStateRef.current) {
+      setHasUnsavedChanges(true);
+    }
+  }, [canvasComponents, settings?.backgroundImageUrl, settings?.logoUrl, settings?.backgroundColor]);
+
+  // System templates (mock data for now)
+  const systemTemplates = [
+    { id: 'sys-1', name: 'Conference Badge', description: 'Standard conference layout with QR code', preview: '🎫' },
+    { id: 'sys-2', name: 'VIP Pass', description: 'Premium design with gold accents', preview: '⭐' },
+    { id: 'sys-3', name: 'Staff Badge', description: 'Simple staff identification', preview: '👤' },
+    { id: 'sys-4', name: 'Minimal', description: 'Clean minimal design', preview: '◻️' },
+  ];
+
+  // Load templates after a short delay to ensure loadEvent() has completed
+  // and settings/currentTemplateId are initialized before auto-loading default template
   useEffect(() => {
     if (eventId) {
-      // Small delay to ensure loadEvent has a chance to set legacy template first
       const timer = setTimeout(() => {
-        loadTemplates(true); // Auto-load default if no template is loaded
+        loadTemplates(true);
       }, 100);
       return () => clearTimeout(timer);
     }
+    // Note: loadTemplates is intentionally excluded from deps to prevent re-fetching
+    // on every render. We only want to load templates once when eventId changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
+
 
   const handleSave = async () => {
     if (!settings) return;
+    if (isSaving) return; // Prevent double-clicks
     
     setIsSaving(true);
+    const saveToastId = toast.loading('Saving badge design...');
+    
+    // Safety timeout - increased to 30 seconds for slow connections
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[BadgeDesigner] Save timeout - resetting state');
+      setIsSaving(false);
+      toast.error('Save timed out. Please check your connection and try again.', { id: saveToastId });
+    }, 30000);
+    
     try {
-      // Store canvas layout in Supabase badge_template field
       const badgeTemplate = {
         size: settings.size || 'CR80',
-        customWidth: settings.customWidth,
-        customHeight: settings.customHeight,
-        backgroundColor: settings.backgroundColor,
-        backgroundImageUrl: settings.backgroundImageUrl,
-        backgroundImageFit: settings.backgroundImageFit,
-        logoUrl: settings.logoUrl,
-        components: canvasComponents,
-        printConfiguration: printConfiguration
+        customWidth: settings.customWidth || null,
+        customHeight: settings.customHeight || null,
+        backgroundColor: settings.backgroundColor || '#f3f4f6',
+        backgroundImageUrl: settings.backgroundImageUrl || null,
+        backgroundImageFit: settings.backgroundImageFit || 'cover',
+        logoUrl: settings.logoUrl || null,
+        components: canvasComponents || [],
+        printConfiguration: printConfiguration || null
       };
       
-      // Update event record in Supabase with badge template
-      const { error } = await supabase
+      console.log('[BadgeDesigner] Saving badge template:', { eventId, badgeTemplate });
+      
+      const { data, error } = await supabase
         .from('events')
-        .update({
-          badge_template: badgeTemplate
-        })
-        .eq('id', eventId);
+        .update({ badge_template: badgeTemplate })
+        .eq('id', eventId)
+        .select();
+      
+      clearTimeout(safetyTimeout);
       
       if (error) {
+        console.error('[BadgeDesigner] Supabase error:', error);
+        toast.error(`Failed to save: ${error.message}`, { id: saveToastId });
         throw new Error(`Failed to save badge template: ${error.message}`);
       }
 
-      // Also save canvas layout to localStorage as backup
-      localStorage.setItem(`badge_canvas_${eventId}`, JSON.stringify(canvasComponents));
+      console.log('[BadgeDesigner] Save successful:', data);
       
+      // Also update the template in badge_templates table if one is loaded
+      let templateUpdated = false;
+      if (currentTemplateId && currentTemplateId !== 'event' && currentTemplateId !== 'legacy') {
+        console.log('[BadgeDesigner] Also updating template in badge_templates:', currentTemplateId);
+        const { error: templateError } = await supabase
+          .from('badge_templates')
+          .update({
+            template_data: badgeTemplate,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', currentTemplateId);
+        
+        if (templateError) {
+          console.warn('[BadgeDesigner] Failed to update template:', templateError);
+        } else {
+          console.log('[BadgeDesigner] Template updated successfully');
+          templateUpdated = true;
+          // Refresh templates list in background
+          loadTemplates().catch(console.error);
+        }
+      }
+      
+      // Update saved state ref to current state
+      lastSavedStateRef.current = JSON.stringify({
+        components: canvasComponents,
+        backgroundImageUrl: settings.backgroundImageUrl,
+        logoUrl: settings.logoUrl,
+        backgroundColor: settings.backgroundColor
+      });
+      setHasUnsavedChanges(false);
       setSaveSuccess(true);
+      
+      // Show success toast
+      if (templateUpdated) {
+        toast.success('Badge and template saved successfully!', { id: saveToastId });
+      } else {
+        toast.success('Badge design saved!', { id: saveToastId });
+      }
+      
       setTimeout(() => {
         setSaveSuccess(false);
-        onClose?.();
       }, 1500);
     } catch (error) {
+      clearTimeout(safetyTimeout);
       console.error('Error saving badge settings:', error);
-      alert('Failed to save badge settings: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      toast.error('Failed to save: ' + (error instanceof Error ? error.message : 'Unknown error'), { id: saveToastId });
     } finally {
       setIsSaving(false);
     }
@@ -603,14 +864,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     setSettings({ ...settings, ...updates });
   };
 
-  // Test Print function - prints badge with sample data
   const handleTestPrint = async () => {
     if (!settings || !event) return;
     
     setIsPrinting(true);
     
     try {
-      // Sample participant data for test print
       const sampleParticipant = {
         id: 'SAMPLE-001',
         name: 'John Doe',
@@ -621,14 +880,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         customData: {} as Record<string, string>
       };
 
-      // Add sample custom field data
       if (event.customFields) {
         event.customFields.forEach((field) => {
           sampleParticipant.customData[field.id] = `Sample ${field.label}`;
         });
       }
 
-      // Generate QR code for sample
       let qrCodeDataUrl = '';
       try {
         qrCodeDataUrl = await QRCodeLib.toDataURL(sampleParticipant.id, {
@@ -640,7 +897,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         console.error('Error generating QR code:', err);
       }
 
-      // Create print content
       const printWindow = window.open('', '_blank');
       if (!printWindow) {
         alert('Please allow pop-ups to use the test print feature');
@@ -652,7 +908,6 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       const badgeWidth = settings.size === 'custom' ? settings.customWidth || 100 : selectedSize.width;
       const badgeHeight = settings.size === 'custom' ? settings.customHeight || 100 : selectedSize.height;
 
-      // Build badge HTML content
       let componentsHtml = '';
       for (const comp of canvasComponents) {
         if (!comp.enabled) continue;
@@ -673,6 +928,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
           align-items: center;
           justify-content: ${comp.textAlign === 'left' ? 'flex-start' : comp.textAlign === 'right' ? 'flex-end' : 'center'};
           overflow: hidden;
+          ${comp.rotation ? `transform: rotate(${comp.rotation}deg); transform-origin: center;` : ''}
         `;
 
         let content = '';
@@ -711,19 +967,9 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         <head>
           <title>Test Print - Badge</title>
           <style>
-            @page {
-              size: ${badgeWidth}mm ${badgeHeight}mm;
-              margin: 0;
-            }
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-            }
+            @page { size: ${badgeWidth}mm ${badgeHeight}mm; margin: 0; }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { margin: 0; padding: 0; }
             .badge {
               width: ${badgeWidth}mm;
               height: ${badgeHeight}mm;
@@ -731,28 +977,13 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
               background-color: ${settings.backgroundColor || '#f3f4f6'};
               ${settings.backgroundImageUrl ? `background-image: url('${settings.backgroundImageUrl}'); background-size: ${settings.backgroundImageFit || 'cover'}; background-position: center;` : ''}
               overflow: hidden;
-              page-break-after: always;
             }
-            .badge:last-child {
-              page-break-after: auto;
-            }
-            @media print {
-              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            }
+            @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
           </style>
         </head>
         <body>
-          <div class="badge">
-            ${componentsHtml}
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-                window.close();
-              }, 500);
-            };
-          </script>
+          <div class="badge">${componentsHtml}</div>
+          <script>window.onload = function() { setTimeout(function() { window.print(); window.close(); }, 500); };</script>
         </body>
         </html>
       `;
@@ -767,6 +998,7 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
       setIsPrinting(false);
     }
   };
+
 
   const addComponentToCanvas = (
     componentType: string,
@@ -786,14 +1018,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     const componentWidth = componentType === 'qrcode' ? 25 : 60;
     const componentHeight = componentType === 'qrcode' ? 25 : 12;
 
-    const xPercent = Math.max(
-      0,
-      Math.min(100 - componentWidth, (dropX / canvasWidth) * 100)
-    );
-    const yPercent = Math.max(
-      0,
-      Math.min(100 - componentHeight, (dropY / canvasHeight) * 100)
-    );
+    const xPercent = Math.max(0, Math.min(100 - componentWidth, (dropX / canvasWidth) * 100));
+    const yPercent = Math.max(0, Math.min(100 - componentHeight, (dropY / canvasHeight) * 100));
 
     const newComponent: CanvasComponent = {
       id: Date.now().toString(),
@@ -820,17 +1046,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   };
 
   const updateComponent = (id: string, updates: Partial<CanvasComponent>) => {
-    setCanvasComponents(prev => {
-      const newComponents = prev.map(c => c.id === id ? { ...c, ...updates } : c);
-      return newComponents;
-    });
+    setCanvasComponents(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
 
-  // Track component changes for undo/redo (debounced to avoid too many history entries)
   const lastSaveRef = useRef<number>(0);
   const saveComponentsToHistory = (components: CanvasComponent[]) => {
     const now = Date.now();
-    // Only save if more than 500ms since last save (debounce)
     if (now - lastSaveRef.current > 500) {
       saveToHistory(components);
       lastSaveRef.current = now;
@@ -846,41 +1067,27 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const applyZoom = (value: number, disableAutoZoom = true) => {
     const clamped = parseFloat(clampZoom(value).toFixed(2));
     setZoomLevel(clamped);
-    if (disableAutoZoom) {
-      setIsAutoZoom(false);
-    }
+    if (disableAutoZoom) setIsAutoZoom(false);
   };
 
-  const incrementZoom = (delta: number) => {
-    applyZoom(zoomLevel + delta, true);
-  };
+  const incrementZoom = (delta: number) => applyZoom(zoomLevel + delta, true);
 
-  // Calculate auto-fit zoom based on container size and canvas size
   const calculateAutoFitZoom = (containerWidth: number, containerHeight: number, canvasW: number, canvasH: number) => {
-    const padding = 80; // Padding around the canvas
+    const padding = 80;
     const availableWidth = containerWidth - padding;
     const availableHeight = containerHeight - padding;
-    
     const scaleX = availableWidth / canvasW;
     const scaleY = availableHeight / canvasH;
-    
-    // Use the smaller scale to ensure canvas fits in both dimensions
-    const fitZoom = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x max for auto
-    return Math.max(0.25, fitZoom); // Min 0.25x
+    const fitZoom = Math.min(scaleX, scaleY, 1.5);
+    return Math.max(0.25, fitZoom);
   };
 
-  // Reset to auto-fit zoom
-  const resetToAutoFit = () => {
-    setIsAutoZoom(true);
-  };
+  const resetToAutoFit = () => setIsAutoZoom(true);
 
-  // Save state to history for undo/redo
   const saveToHistory = (components: CanvasComponent[]) => {
     const newHistory = history.slice(0, historyIndex + 1);
     newHistory.push([...components]);
-    if (newHistory.length > maxHistoryLength) {
-      newHistory.shift();
-    }
+    if (newHistory.length > maxHistoryLength) newHistory.shift();
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
   };
@@ -902,78 +1109,73 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
 
-  // Request delete confirmation
   const requestDeleteComponent = (id: string) => {
     setComponentToDelete(id);
     setDeleteConfirmOpen(true);
   };
 
-  // Confirm delete
   const confirmDeleteComponent = () => {
     if (componentToDelete) {
       saveToHistory(canvasComponents);
       setCanvasComponents(prev => prev.filter(c => c.id !== componentToDelete));
-      if (selectedComponentId === componentToDelete) {
-        setSelectedComponentId(null);
-      }
+      if (selectedComponentId === componentToDelete) setSelectedComponentId(null);
     }
     setDeleteConfirmOpen(false);
     setComponentToDelete(null);
   };
 
-  const deleteComponent = (id: string) => {
-    requestDeleteComponent(id);
-  };
+  const deleteComponent = (id: string) => requestDeleteComponent(id);
+
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Delete selected component
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedComponentId) {
-        // Don't trigger if user is typing in an input
-        if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') {
-          return;
-        }
         e.preventDefault();
         requestDeleteComponent(selectedComponentId);
       }
       
-      // Undo: Ctrl+Z
-      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+      if (selectedComponentId && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
-        undo();
+        const component = canvasComponents.find(c => c.id === selectedComponentId);
+        if (component) {
+          const step = e.shiftKey ? 10 : 1;
+          let newX = component.x;
+          let newY = component.y;
+          
+          switch (e.key) {
+            case 'ArrowUp': newY -= step; break;
+            case 'ArrowDown': newY += step; break;
+            case 'ArrowLeft': newX -= step; break;
+            case 'ArrowRight': newX += step; break;
+          }
+          
+          updateComponent(selectedComponentId, { x: newX, y: newY });
+        }
       }
       
-      // Redo: Ctrl+Shift+Z or Ctrl+Y
-      if ((e.ctrlKey && e.shiftKey && e.key === 'z') || (e.ctrlKey && e.key === 'y')) {
-        e.preventDefault();
-        redo();
-      }
-      
-      // Escape to deselect
-      if (e.key === 'Escape') {
-        setSelectedComponentId(null);
-      }
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if ((e.ctrlKey && e.shiftKey && e.key === 'z') || (e.ctrlKey && e.key === 'y')) { e.preventDefault(); redo(); }
+      if (e.key === 'Escape') setSelectedComponentId(null);
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedComponentId, historyIndex, history, canvasComponents]);
 
-  // Save to history when components change
   useEffect(() => {
     if (canvasComponents.length > 0) {
-      // Initialize history on first load
       if (history.length === 0) {
         saveToHistory(canvasComponents);
       } else {
-        // Save changes (debounced)
         saveComponentsToHistory(canvasComponents);
       }
     }
   }, [JSON.stringify(canvasComponents)]);
 
-  // Auto-fit zoom when badge size changes or container resizes
   useEffect(() => {
     if (!isAutoZoom || !previewContainerRef.current || !settings) return;
     
@@ -991,11 +1193,8 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     };
     
     updateAutoZoom();
-    
-    // Also update on window resize
     const resizeObserver = new ResizeObserver(updateAutoZoom);
     resizeObserver.observe(container);
-    
     return () => resizeObserver.disconnect();
   }, [isAutoZoom, settings?.size, settings?.customWidth, settings?.customHeight]);
 
@@ -1003,13 +1202,11 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       alert('Please upload an image file (PNG or JPG)');
       return;
     }
 
-    // Validate file size (max 5MB)
     if (file.size > 5 * 1024 * 1024) {
       alert('Image must be smaller than 5MB');
       return;
@@ -1017,15 +1214,12 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
 
     setIsUploadingBg(true);
     try {
-      // TODO: Implement Supabase image upload using proper client
-      // For now, create a local data URL placeholder
       const reader = new FileReader();
       reader.onload = () => {
         const dataUrl = reader.result as string;
         updateSettings({ backgroundImageUrl: dataUrl });
       };
       reader.readAsDataURL(file);
-      
     } catch (error: any) {
       console.error('Error uploading background image:', error);
       alert('Failed to upload image: ' + (error.message || 'Unknown error'));
@@ -1050,790 +1244,610 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
   const height = settings.size === 'custom' ? settings.customHeight || 100 : selectedSize.height;
   const canvasWidth = width * CANVAS_SCALE;
   const canvasHeight = height * CANVAS_SCALE;
-
   const selectedComponent = canvasComponents.find(c => c.id === selectedComponentId);
 
+  const customFields = availableFields.filter(f => !['name', 'email', 'phone', 'company', 'position'].includes(f.name));
+
+
   return (
-    <div className="space-y-6">
-      {/* Header - Outside Card */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="h-12 w-12 rounded-2xl gradient-primary flex items-center justify-center shadow-lg">
-            <CreditCard className="h-6 w-6 text-white" />
+    <div className="h-screen flex flex-col bg-gray-100">
+      {/* TOP TOOLBAR */}
+      <header className="h-14 bg-white border-b border-gray-200 flex items-center px-4 gap-4 shrink-0 shadow-sm">
+
+
+        {/* Template Name Display - Document Title Pattern */}
+        <div className="flex items-center gap-2 min-w-0 max-w-[200px]">
+          <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => {
+            if (currentTemplateName) {
+              setNewTemplateName(currentTemplateName);
+            } else {
+              setNewTemplateName('');
+            }
+            setShowSaveTemplateDialog(true);
+          }}>
+            <FileText className="h-4 w-4 text-gray-400 shrink-0" />
+            <span 
+              className={`text-sm truncate ${
+                currentTemplateName 
+                  ? 'font-medium text-gray-900' 
+                  : 'italic text-gray-400'
+              }`}
+              title={currentTemplateName || 'Untitled Design'}
+            >
+              {currentTemplateName || 'Untitled Design'}
+            </span>
+            <Pencil className="h-3 w-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
           </div>
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900">Badge Designer</h2>
-            <p className="text-sm text-gray-600 mt-1">{event.name}</p>
-          </div>
+          {hasUnsavedChanges && (
+            <span className="w-2 h-2 rounded-full bg-orange-400 shrink-0" title="Unsaved changes" />
+          )}
         </div>
-        <div className="flex items-center gap-3">
-          {/* Undo/Redo buttons */}
+
+        <div className="h-6 w-px bg-gray-200 mx-2" />
+
+        {/* Badge Size Dropdown */}
+        <div className="flex items-center gap-2">
+          <Select
+            value={settings.size || 'CR80'}
+            onValueChange={(value: string) => updateSettings({ size: value as any })}
+          >
+            <SelectTrigger className="h-9 w-[160px] text-xs">
+              <SelectValue placeholder="Badge Size" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[300px] overflow-y-auto z-50">
+              <SelectGroup>
+                <SelectLabel className="text-[10px]">ID Card Sizes</SelectLabel>
+                {['CR80', 'B1', 'B2', 'B3', 'B4', 'A1', 'A2', 'A3'].map((key) => (
+                  <SelectItem key={key} value={key} className="text-xs">
+                    {BADGE_SIZES[key as keyof typeof BADGE_SIZES].label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel className="text-[10px]">Paper</SelectLabel>
+                {['A6', 'A7'].map((key) => (
+                  <SelectItem key={key} value={key} className="text-xs">
+                    {BADGE_SIZES[key as keyof typeof BADGE_SIZES].label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectItem value="custom" className="text-xs">Custom Size</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Custom Size Inputs - Show when custom is selected */}
+          {settings.size === 'custom' && (
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={settings.customWidth || 100}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    updateSettings({ customWidth: val });
+                  }
+                }}
+                className="h-9 w-16 text-xs text-center"
+                min={10}
+                max={500}
+                placeholder="W"
+              />
+              <span className="text-xs text-gray-400">×</span>
+              <Input
+                type="number"
+                value={settings.customHeight || 150}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    updateSettings({ customHeight: val });
+                  }
+                }}
+                className="h-9 w-16 text-xs text-center"
+                min={10}
+                max={500}
+                placeholder="H"
+              />
+              <span className="text-xs text-gray-400">mm</span>
+            </div>
+          )}
+
+          {/* Orientation Toggle */}
+          <div className="flex border rounded-md overflow-hidden">
+            <button
+              onClick={() => {
+                if (width > height) {
+                  if (settings.size === 'custom') {
+                    updateSettings({ customWidth: settings.customHeight, customHeight: settings.customWidth });
+                  } else {
+                    const s = BADGE_SIZES[settings.size as keyof typeof BADGE_SIZES];
+                    updateSettings({ size: 'custom' as any, customWidth: Math.min(s.width, s.height), customHeight: Math.max(s.width, s.height) });
+                  }
+                }
+              }}
+              className={`px-2 py-1.5 text-xs ${height >= width ? 'bg-primary-100 text-primary-700' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              title="Portrait"
+            >
+              <svg className="w-3 h-4" viewBox="0 0 12 16" fill="currentColor" opacity={0.5}><rect x="1" y="1" width="10" height="14" rx="1" /></svg>
+            </button>
+            <button
+              onClick={() => {
+                if (height > width) {
+                  if (settings.size === 'custom') {
+                    updateSettings({ customWidth: settings.customHeight, customHeight: settings.customWidth });
+                  } else {
+                    const s = BADGE_SIZES[settings.size as keyof typeof BADGE_SIZES];
+                    updateSettings({ size: 'custom' as any, customWidth: Math.max(s.width, s.height), customHeight: Math.min(s.width, s.height) });
+                  }
+                }
+              }}
+              className={`px-2 py-1.5 text-xs ${width > height ? 'bg-primary-100 text-primary-700' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              title="Landscape"
+            >
+              <svg className="w-4 h-3" viewBox="0 0 16 12" fill="currentColor" opacity={0.5}><rect x="1" y="1" width="14" height="10" rx="1" /></svg>
+            </button>
+          </div>
+
+          <span className="text-xs text-gray-500 hidden md:inline">
+            {width.toFixed(1)} × {height.toFixed(1)}mm
+          </span>
+        </div>
+
+        <div className="h-6 w-px bg-gray-200 mx-2" />
+
+        {/* Undo/Redo */}
+        <div className="flex items-center gap-1">
           <TooltipProvider>
-            <div className="flex items-center gap-1 mr-2 border-r border-gray-300 pr-4">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={undo}
-                    disabled={!canUndo}
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                  >
-                    <Undo2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Undo (Ctrl+Z)</p>
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    onClick={redo}
-                    disabled={!canRedo}
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                  >
-                    <Redo2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Redo (Ctrl+Y)</p>
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={undo} disabled={!canUndo} className="h-9 w-9 p-0">
+                  <Undo2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>Undo (Ctrl+Z)</p></TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={redo} disabled={!canRedo} className="h-9 w-9 p-0">
+                  <Redo2 className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent><p>Redo (Ctrl+Y)</p></TooltipContent>
+            </Tooltip>
           </TooltipProvider>
-          
-          <Button
-            onClick={handleTestPrint}
-            disabled={isPrinting}
-            variant="outline"
-            className="px-4 h-10 border-primary-300 text-primary-700 hover:bg-primary-50"
-          >
-            {isPrinting ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-primary-600 border-t-transparent mr-2"></div>
-                Printing...
-              </>
-            ) : (
-              <>
-                <Printer className="mr-2 h-4 w-4" />
-                Test Print
-              </>
-            )}
-          </Button>
-          <Button
-            onClick={handleClose}
-            variant="outline"
-            className="px-6 h-10 border-gray-300 text-gray-700 hover:bg-gray-100"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="px-8 h-10 gradient-primary hover:opacity-90 text-white border-none font-semibold shadow-lg hover:shadow-xl transition-all"
-          >
-            {isSaving ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                Saving...
-              </>
-            ) : saveSuccess ? (
-              <>
-                <CheckCircle2 className="mr-2 h-5 w-5" />
-                Saved!
-              </>
-            ) : (
-              <>
-                <Save className="mr-2 h-5 w-5" />
-                Save Template
-              </>
-            )}
-            </Button>
         </div>
-      </div>
 
-      <div className="min-h-[calc(100vh-280px)] flex flex-col bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
-      <main className="flex-1 min-h-0 px-5 py-5 overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200">
-        <div className="mx-auto grid h-full min-h-[500px] gap-4 max-w-[1800px]" style={{ gridTemplateColumns: '300px 1fr 300px' }}>
-          {/* Left Sidebar - CONTROLS - Fixed width */}
-          <section className="flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg min-h-[500px]">
-            <div className="px-4 py-3 bg-gradient-to-r gradient-primary">
-              <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                </svg>
-                Badge Controls
-              </h3>
+        <div className="h-6 w-px bg-gray-200 mx-2" />
+
+        {/* Zoom Controls */}
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={() => incrementZoom(-0.1)} className="h-8 w-8 p-0">
+            <Minus className="h-4 w-4" />
+          </Button>
+          <span className="text-xs font-medium w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+          <Button variant="ghost" size="sm" onClick={() => incrementZoom(0.1)} className="h-8 w-8 p-0">
+            <Plus className="h-4 w-4" />
+          </Button>
+          <Button
+            variant={isAutoZoom ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={resetToAutoFit}
+            className="h-8 px-2 text-xs"
+          >
+            Fit
+          </Button>
+        </div>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Right: Actions */}
+        <div className="flex items-center gap-2">
+          {/* Templates Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTemplatesModal(true)}
+            className="h-9 px-3 text-xs"
+          >
+            <LayoutTemplate className="h-4 w-4 mr-1.5" />
+            Templates
+          </Button>
+
+          {/* Export Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowExportModal(true)}
+            className="h-9 px-3 text-xs"
+          >
+            <Download className="h-4 w-4 mr-1.5" />
+            Export
+          </Button>
+
+          {/* Split Save Button */}
+          <div className="flex items-center">
+            <Button
+              onClick={handleSave}
+              disabled={isSaving}
+              size="sm"
+              className="h-9 px-4 gradient-primary text-white text-xs rounded-r-none border-r border-white/20"
+            >
+              {isSaving ? (
+                <><div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent mr-1.5" />Saving...</>
+              ) : saveSuccess ? (
+                <><CheckCircle2 className="h-4 w-4 mr-1.5" />Saved!</>
+              ) : (
+                <><Save className="h-4 w-4 mr-1.5" />Save</>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-9 px-2 gradient-primary text-white text-xs rounded-l-none"
+                  disabled={isSaving}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => {
+                  setNewTemplateName('');
+                  setSaveAsDefault(false);
+                  setShowSaveTemplateDialog(true);
+                }}>
+                  <Copy className="h-4 w-4 mr-2" />
+                  Save as Template...
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </header>
+
+
+      {/* MAIN CONTENT: Left Sidebar + Canvas + Right Panel */}
+      <div className="flex-1 grid grid-cols-[240px_1fr_280px] overflow-hidden">
+        {/* LEFT SIDEBAR - Tools & Elements */}
+        <aside className="bg-slate-50 border-r border-gray-200 flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 bg-white">
+            <h3 className="text-sm font-semibold text-gray-700">Tools</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            {/* Elements Section */}
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
+                Elements
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => handlePaletteAdd('eventName', undefined, 'Event Name')}
+                  className="flex items-center gap-2 px-3 py-2.5 bg-white rounded-lg border border-gray-200 hover:border-primary-400 hover:bg-primary-50 transition-all text-left"
+                >
+                  <Calendar className="h-4 w-4 text-primary-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Event</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('qrcode', undefined, 'QR Code')}
+                  className="flex items-center gap-2 px-3 py-2.5 bg-white rounded-lg border border-gray-200 hover:border-primary-400 hover:bg-primary-50 transition-all text-left"
+                >
+                  <QrCode className="h-4 w-4 text-primary-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">QR Code</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('logo', undefined, 'Logo')}
+                  className="flex items-center gap-2 px-3 py-2.5 bg-white rounded-lg border border-gray-200 hover:border-primary-400 hover:bg-primary-50 transition-all text-left"
+                >
+                  <ImageIcon className="h-4 w-4 text-primary-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Logo</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('customText', undefined, 'Custom Text')}
+                  className="flex items-center gap-2 px-3 py-2.5 bg-white rounded-lg border border-gray-200 hover:border-primary-400 hover:bg-primary-50 transition-all text-left"
+                >
+                  <Type className="h-4 w-4 text-primary-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Text</span>
+                </button>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <Accordion type="multiple" defaultValue={['templates', 'size', 'palette']} className="w-full space-y-3">
-                {/* Templates Section */}
-                <AccordionItem value="templates" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
-                    <span className="flex items-center gap-2"><FileText className="h-4 w-4" /> Templates</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
-                    <div className="space-y-3">
-                      {/* Current Template */}
-                      {(currentTemplateName || currentTemplateId) && (
-                        <div className="p-2 bg-primary-50 border border-primary-200 rounded-lg">
-                          <p className="text-[10px] text-primary-600 font-medium">Current Template</p>
-                          <p className="text-sm font-semibold text-primary-900">{currentTemplateName || 'Unnamed'}</p>
-                          {currentTemplateId && currentTemplateId !== 'legacy' && (
-                            <p className="text-[9px] text-primary-500 mt-0.5">ID: {currentTemplateId.slice(0, 8)}...</p>
-                          )}
-                          {currentTemplateId === 'legacy' && (
-                            <p className="text-[9px] text-orange-500 mt-0.5">Legacy template (stored in event)</p>
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* Saved Templates List */}
-                      {savedTemplates.length > 0 && (
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold text-gray-700">Load Template</Label>
-                          <Select
-                            value={currentTemplateId || ''}
-                            onValueChange={(value) => {
-                              const template = savedTemplates.find(t => t.id === value);
-                              if (template) loadTemplateIntoDesigner(template);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 text-xs">
-                              <SelectValue placeholder="Select template to load" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {savedTemplates.map((template) => (
-                                <SelectItem key={template.id} value={template.id} className="text-xs">
-                                  <div className="flex items-center gap-2">
-                                    <span>{template.name}</span>
-                                    {template.is_default && (
-                                      <span className="text-[9px] bg-primary-100 text-primary-700 px-1 rounded">Default</span>
-                                    )}
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      )}
-                      
-                      {/* Save Actions */}
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={() => setShowSaveTemplateDialog(true)}
-                          variant="outline"
-                          size="sm"
-                          className="flex-1 h-8 text-xs border-primary-300 text-primary-700 hover:bg-primary-50"
-                        >
-                          <Plus className="h-3 w-3 mr-1" />
-                          Save As New
-                        </Button>
-                        {(currentTemplateId || currentTemplateName) && (
-                          <Button
-                            onClick={handleUpdateTemplate}
-                            disabled={isSaving}
-                            size="sm"
-                            style={{ backgroundColor: '#7c3aed', color: 'white' }}
-                            className="flex-1 h-8 text-xs hover:opacity-90"
-                          >
-                            <Save className="h-3 w-3 mr-1" />
-                            {isSaving ? 'Saving...' : 'Update'}
-                          </Button>
-                        )}
-                      </div>
-                      
-                      {savedTemplates.length === 0 && (
-                        <p className="text-[10px] text-gray-500 text-center py-2">
-                          No saved templates yet. Click "Save As New" to create one.
-                        </p>
-                      )}
+
+            {/* Standard Fields Section */}
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1">
+                Participant Fields
+              </div>
+              <div className="space-y-1.5">
+                <button
+                  onClick={() => handlePaletteAdd('field', 'name', 'Name')}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                >
+                  <User className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Name</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('field', 'email', 'Email')}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                >
+                  <Mail className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Email</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('field', 'company', 'Company')}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                >
+                  <Building className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Company</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('field', 'position', 'Position')}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                >
+                  <Briefcase className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Position</span>
+                </button>
+                <button
+                  onClick={() => handlePaletteAdd('field', 'phone', 'Phone')}
+                  className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                >
+                  <Phone className="h-4 w-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-medium text-gray-700">Phone</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Fields Section */}
+            {customFields.length > 0 && (
+              <Collapsible open={fieldsExpanded} onOpenChange={setFieldsExpanded}>
+                <CollapsibleTrigger className="w-full flex items-center justify-between text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2 px-1 hover:text-gray-700">
+                  <span>Custom Fields ({customFields.length})</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform ${fieldsExpanded ? 'rotate-180' : ''}`} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-1.5">
+                  {customFields.map((field) => (
+                    <button
+                      key={field.name}
+                      onClick={() => handlePaletteAdd('field', field.name, field.label)}
+                      className="w-full flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-gray-200 hover:border-green-400 hover:bg-green-50 transition-all text-left"
+                    >
+                      <Type className="h-4 w-4 text-green-600 shrink-0" />
+                      <span className="text-xs font-medium text-gray-700 truncate">{field.label}</span>
+                    </button>
+                  ))}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+          </div>
+        </aside>
+
+
+        {/* CENTER CANVAS AREA - Infinite canvas style */}
+        <main 
+          ref={previewContainerRef}
+          className="relative overflow-auto bg-[#1e1e1e] flex items-center justify-center select-none"
+          onMouseDown={(e) => {
+            // Only deselect if clicking directly on the main background (not bubbled from children)
+            if (e.target === e.currentTarget) {
+              setSelectedComponentId(null);
+            }
+          }}
+          style={{
+            backgroundImage: 'radial-gradient(circle, #333 1px, transparent 1px)',
+            backgroundSize: '20px 20px'
+          }}
+        >
+          {/* Canvas container with shadow */}
+          <div
+            className="relative transform transition-transform duration-200 ease-out shadow-2xl"
+            style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
+          >
+            <BadgeCanvas
+              width={canvasWidth}
+              height={canvasHeight}
+              backgroundColor={settings.backgroundColor}
+              backgroundImageUrl={settings.backgroundImageUrl}
+              backgroundImageFit={settings.backgroundImageFit}
+              components={canvasComponents}
+              selectedComponentId={selectedComponentId}
+              onComponentSelect={setSelectedComponentId}
+              onComponentMove={(id, x, y) => updateComponent(id, { x, y })}
+              onComponentResize={(id, w, h) => updateComponent(id, { width: w, height: h })}
+              event={event}
+              zoomLevel={zoomLevel}
+            />
+          </div>
+          
+          {/* Canvas info bar */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm">
+            {width.toFixed(1)} × {height.toFixed(1)} mm
+          </div>
+        </main>
+
+        {/* RIGHT PROPERTIES PANEL */}
+        <aside className="bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+            <h3 className="text-sm font-semibold text-gray-700">Properties</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            {selectedComponent ? (
+              <ComponentStylingPanel
+                component={selectedComponent}
+                onUpdate={(updates) => updateComponent(selectedComponent.id, updates)}
+                onDelete={() => deleteComponent(selectedComponent.id)}
+                logoUrl={settings.logoUrl}
+                onLogoUrlChange={(url) => updateSettings({ logoUrl: url })}
+                badgeWidthMm={width}
+                badgeHeightMm={height}
+              />
+            ) : (
+              <div className="h-full flex flex-col">
+                {/* Empty State */}
+                <div className="flex-1 flex items-center justify-center">
+                  <div className="text-center px-4">
+                    <div className="w-14 h-14 mx-auto rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                      <MousePointer2 className="h-7 w-7 text-gray-400" />
                     </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                <AccordionItem value="size" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
-                    <span className="flex items-center gap-2"><CreditCard className="h-4 w-4" /> Badge Size</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
-                    <div className="space-y-3">
-                      {/* Size Dropdown */}
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-gray-700">Size</Label>
-                        <Select
-                          value={settings.size || 'CR80'}
-                          onValueChange={(value: string) => updateSettings({ size: value as any })}
-                        >
-                          <SelectTrigger className="h-9 text-sm">
-                            <SelectValue placeholder="Select badge size" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-[300px]">
-                            <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">ID Card Sizes</SelectLabel>
-                              {['CR80', 'B1', 'B2', 'B3', 'B4', 'A1', 'A2', 'A3'].map((key) => {
-                                const size = BADGE_SIZES[key as keyof typeof BADGE_SIZES];
-                                return (
-                                  <SelectItem key={key} value={key} className="text-sm">
-                                    {size.label}
-                                  </SelectItem>
-                                );
-                              })}
-                            </SelectGroup>
-                            <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">Paper Sizes</SelectLabel>
-                              {['A6', 'A7'].map((key) => {
-                                const size = BADGE_SIZES[key as keyof typeof BADGE_SIZES];
-                                return (
-                                  <SelectItem key={key} value={key} className="text-sm">
-                                    {size.label}
-                                  </SelectItem>
-                                );
-                              })}
-                            </SelectGroup>
-                            <SelectGroup>
-                              <SelectLabel className="text-[10px] font-semibold text-primary-600 uppercase">Custom</SelectLabel>
-                              <SelectItem value="custom" className="text-sm">Custom Size</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Orientation Toggle - Works for all sizes */}
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-gray-700">Orientation</Label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // Swap to portrait (height > width)
-                              if (width > height) {
-                                // For custom size, swap the custom dimensions
-                                if (settings.size === 'custom') {
-                                  updateSettings({ customWidth: settings.customHeight, customHeight: settings.customWidth });
-                                } else {
-                                  // For preset sizes, swap to custom with swapped dimensions
-                                  const selectedSize = BADGE_SIZES[settings.size as keyof typeof BADGE_SIZES];
-                                  updateSettings({ 
-                                    size: 'custom' as any, 
-                                    customWidth: Math.min(selectedSize.width, selectedSize.height),
-                                    customHeight: Math.max(selectedSize.width, selectedSize.height)
-                                  });
-                                }
-                              }
-                            }}
-                            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 text-xs font-medium transition-all ${
-                              height >= width
-                                ? 'border-primary-500 bg-primary-100 text-primary-900'
-                                : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:bg-primary-50'
-                            }`}
-                          >
-                            <svg className="w-4 h-6" viewBox="0 0 16 24" fill="currentColor" opacity={0.3} stroke="currentColor" strokeWidth="1">
-                              <rect x="1" y="1" width="14" height="22" rx="1" />
-                            </svg>
-                            Portrait
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              // Swap to landscape (width > height)
-                              if (height > width) {
-                                // For custom size, swap the custom dimensions
-                                if (settings.size === 'custom') {
-                                  updateSettings({ customWidth: settings.customHeight, customHeight: settings.customWidth });
-                                } else {
-                                  // For preset sizes, swap to custom with swapped dimensions
-                                  const selectedSize = BADGE_SIZES[settings.size as keyof typeof BADGE_SIZES];
-                                  updateSettings({ 
-                                    size: 'custom' as any, 
-                                    customWidth: Math.max(selectedSize.width, selectedSize.height),
-                                    customHeight: Math.min(selectedSize.width, selectedSize.height)
-                                  });
-                                }
-                              }
-                            }}
-                            className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg border-2 text-xs font-medium transition-all ${
-                              width > height
-                                ? 'border-primary-500 bg-primary-100 text-primary-900'
-                                : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:bg-primary-50'
-                            }`}
-                          >
-                            <svg className="w-6 h-4" viewBox="0 0 24 16" fill="currentColor" opacity={0.3} stroke="currentColor" strokeWidth="1">
-                              <rect x="1" y="1" width="22" height="14" rx="1" />
-                            </svg>
-                            Landscape
-                          </button>
-                        </div>
-                      </div>
-
-                      {settings.size === 'custom' && (
-                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-200">
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-gray-700">Width (mm)</Label>
-                            <Input
-                              type="number"
-                              value={settings.customWidth || 100}
-                              onChange={(e) => updateSettings({ customWidth: parseInt(e.target.value) })}
-                              className="h-9 text-sm"
-                            />
-                          </div>
-                          <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-gray-700">Height (mm)</Label>
-                            <Input
-                              type="number"
-                              value={settings.customHeight || 150}
-                              onChange={(e) => updateSettings({ customHeight: parseInt(e.target.value) })}
-                              className="h-9 text-sm"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="text-sm text-white bg-gradient-to-r gradient-primary rounded-lg px-4 py-3 font-bold text-center shadow-md">
-                        {width.toFixed(1)}mm x {height.toFixed(1)}mm
-                        <span className="text-xs opacity-80 ml-2">
-                          ({width > height ? 'Landscape' : 'Portrait'})
-                        </span>
+                    <p className="text-sm font-medium text-gray-600">Select a component</p>
+                    <p className="text-xs text-gray-400 mt-1">Click any element on the canvas to edit</p>
+                    
+                    <div className="mt-6 pt-4 border-t border-gray-100">
+                      <p className="text-[10px] text-gray-400 font-medium mb-2">Shortcuts</p>
+                      <div className="space-y-1 text-[10px] text-gray-500">
+                        <div><kbd className="px-1 py-0.5 bg-gray-100 rounded text-[9px]">Del</kbd> Remove</div>
+                        <div><kbd className="px-1 py-0.5 bg-gray-100 rounded text-[9px]">Ctrl+Z</kbd> Undo</div>
+                        <div><kbd className="px-1 py-0.5 bg-gray-100 rounded text-[9px]">Arrows</kbd> Move</div>
                       </div>
                     </div>
-                  </AccordionContent>
-                </AccordionItem>
+                  </div>
+                </div>
 
-                <AccordionItem value="palette" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-2 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
-                    <span className="flex items-center gap-2"><Plus className="h-4 w-4" /> Component Palette</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-3 py-3 bg-gray-50 rounded-b-lg max-h-[400px] overflow-y-auto">
-                    <div className="space-y-1.5">
-                      <div className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider px-1 py-1">Basic Elements</div>
-                      <div className="grid grid-cols-3 gap-1">
-                        <PaletteItem type="eventName" label="Event Name" onAdd={handlePaletteAdd}>
-                          <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
-                          <span className="text-xs truncate">Event</span>
-                        </PaletteItem>
-
-                        <PaletteItem type="qrcode" label="QR Code" onAdd={handlePaletteAdd}>
-                          <QrCode className="h-3 w-3 text-primary-600 flex-shrink-0" />
-                          <span className="text-xs truncate">QR</span>
-                        </PaletteItem>
-
-                        <PaletteItem type="logo" label="Event Logo" onAdd={handlePaletteAdd}>
-                          <ImageIcon className="h-3 w-3 text-primary-600 flex-shrink-0" />
-                          <span className="text-xs truncate">Logo</span>
-                        </PaletteItem>
-                      </div>
-
-                      <div className="border-t border-primary-200 my-2"></div>
-
-                      <div className="text-[10px] font-semibold text-primary-700 uppercase tracking-wider px-1 py-1">Standard Fields</div>
-                      <div className="grid grid-cols-2 gap-1">
-                        {availableFields.filter(f => ['name', 'email', 'phone', 'company', 'position'].includes(f.name)).map(field => (
-                          <PaletteItem
-                            key={field.name}
-                            type="field"
-                            fieldName={field.name}
-                            label={field.label}
-                            onAdd={handlePaletteAdd}
-                          >
-                            <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
-                            <span className="text-xs truncate">{field.label}</span>
-                          </PaletteItem>
-                        ))}
-                      </div>
-
-                      {/* Custom Fields - only show if there are custom fields */}
-                      {availableFields.filter(f => !['name', 'email', 'phone', 'company', 'position'].includes(f.name)).length > 0 && (
-                        <>
-                          <div className="text-[10px] font-semibold text-green-700 uppercase tracking-wider px-1 py-1 mt-2">Custom Fields</div>
-                          <div className="grid grid-cols-2 gap-1">
-                            {availableFields.filter(f => !['name', 'email', 'phone', 'company', 'position'].includes(f.name)).map(field => (
-                              <PaletteItem
-                                key={field.name}
-                                type="field"
-                                fieldName={field.name}
-                                label={field.label}
-                                onAdd={handlePaletteAdd}
-                              >
-                                <Type className="h-3 w-3 text-green-600 flex-shrink-0" />
-                                <span className="text-xs truncate">{field.label}</span>
-                              </PaletteItem>
-                            ))}
-                          </div>
-                        </>
-                      )}
-
-                      <div className="border-t border-primary-100 my-1.5"></div>
-
-                      <PaletteItem type="customText" label="Custom Text" onAdd={handlePaletteAdd}>
-                        <Type className="h-3 w-3 text-primary-600 flex-shrink-0" />
-                        <span className="text-xs">Custom Text</span>
-                      </PaletteItem>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                <AccordionItem value="background" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
-                    <span className="flex items-center gap-2"><ImageIcon className="h-4 w-4" /> Background</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg">
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-primary-700">Color</Label>
-                        <div className="flex gap-3">
+                {/* Background Section - Always visible */}
+                <div className="border-t border-gray-200 pt-4 mt-4">
+                  <Collapsible defaultOpen>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-3">
+                      <span>Background</span>
+                      <ChevronDown className="h-4 w-4" />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-3">
+                      <div>
+                        <Label className="text-xs text-gray-500">Color</Label>
+                        <div className="flex gap-2 mt-1">
                           <Input
                             type="color"
-                            value={settings.backgroundColor}
+                            value={settings.backgroundColor || '#f3f4f6'}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                            className="w-12 h-10 p-1 rounded border border-primary-300"
+                            className="w-10 h-9 p-1 rounded border"
                           />
                           <Input
                             type="text"
-                            value={settings.backgroundColor}
+                            value={settings.backgroundColor || '#f3f4f6'}
                             onChange={(e) => updateSettings({ backgroundColor: e.target.value })}
-                            placeholder="#ffffff"
-                            className="h-10 text-sm flex-1 border-gray-200 focus:border-primary-500"
+                            className="flex-1 h-9 text-xs"
                           />
                         </div>
                       </div>
-
-                      <div className="border-t border-gray-200 pt-4">
-                        <Label className="text-xs font-semibold text-primary-700 mb-2 block">Image</Label>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isUploadingBg}
-                          className="h-9 text-xs w-full border-primary-300 text-primary-700 hover:bg-primary-50 transition-all duration-200"
-                          onClick={() => document.getElementById('bg-file-input')?.click()}
-                        >
-                          <Upload className="h-3.5 w-3.5 mr-1.5" />
-                          {isUploadingBg ? 'Uploading...' : 'Upload Image'}
-                        </Button>
-                        <input
-                          id="bg-file-input"
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg"
-                          onChange={handleBackgroundImageUpload}
-                          className="hidden"
-                        />
-                      </div>
-
-                      {settings.backgroundImageUrl && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => updateSettings({ backgroundImageUrl: '', backgroundImageFit: 'cover' })}
-                          className="h-9 text-xs w-full text-red-600 border-red-200 hover:bg-red-50 transition-all duration-200"
-                        >
-                          Remove Image
-                        </Button>
-                      )}
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                <AccordionItem value="print" className="border border-primary-200 rounded-lg hover:border-primary-300 transition-all bg-white shadow-sm">
-                  <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-primary-900 hover:bg-primary-50 rounded-t-lg">
-                    <span className="flex items-center gap-2"><Printer className="h-4 w-4" /> Print Settings</span>
-                  </AccordionTrigger>
-                  <AccordionContent className="px-4 py-4 bg-gray-50 rounded-b-lg max-h-[400px] overflow-y-auto">
-                    <BadgePrintSettings
-                      configuration={printConfiguration}
-                      badgeWidth={width}
-                      badgeHeight={height}
-                      onConfigurationChange={setPrintConfiguration}
-                    />
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            </div>
-          </section>
-
-          {/* Center - Canvas Preview - Flexible but stable */}
-          <section className="min-h-[500px] flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg">
-            <div className="px-4 py-3 bg-gradient-to-r gradient-primary flex items-center justify-between">
-              <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                </svg>
-                Badge Preview
-              </h2>
-              <TooltipProvider>
-                <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/30">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => incrementZoom(-0.1)}
-                        className="h-8 w-8 p-0 text-white hover:bg-white/20 rounded-md transition-all duration-200"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Zoom Out</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <input
-                    type="range"
-                    min="0.25"
-                    max="2"
-                    step="0.05"
-                    value={zoomLevel}
-                    onChange={(event) => applyZoom(parseFloat(event.target.value), true)}
-                    className="w-24 accent-white h-2 rounded-full"
-                  />
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => incrementZoom(0.1)}
-                        className="h-8 w-8 p-0 text-white hover:bg-white/20 rounded-md transition-all duration-200"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Zoom In</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <span className="text-xs font-bold w-12 text-center text-white">
-                    {Math.round(zoomLevel * 100)}%
-                  </span>
-                  <div className="w-px h-5 bg-white/30 mx-1"></div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={resetToAutoFit}
-                        className={`h-8 px-2 text-xs text-white hover:bg-white/20 rounded-md transition-all duration-200 ${isAutoZoom ? 'bg-white/30' : ''}`}
-                      >
-                        Fit
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>Auto-fit to view</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <div className="w-px h-5 bg-white/30 mx-1"></div>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setShowPrintPreview(!showPrintPreview)}
-                        className={`h-8 px-2 text-xs text-white hover:bg-white/20 rounded-md transition-all duration-200 flex items-center gap-1 ${showPrintPreview ? 'bg-white/30' : ''}`}
-                      >
-                        <FileText className="h-3 w-3" />
-                        Paper
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{showPrintPreview ? 'Hide paper preview' : 'Show paper preview'}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </TooltipProvider>
-            </div>
-
-            <div 
-              ref={previewContainerRef}
-              className="flex-1 flex items-center justify-center overflow-auto bg-gradient-to-br from-slate-50 via-primary-50 to-blue-50 p-6"
-            >
-              {showPrintPreview ? (
-                /* Print Preview Mode - Show badge on paper */
-                (() => {
-                  /* IIFE to calculate paper dimensions */
-                  // Calculate paper dimensions
-                  const paperSize = PRINT_PAPER_SIZES[printConfiguration.sizeType] || PRINT_PAPER_SIZES.A4;
-                  const paperW = printConfiguration.sizeType === 'Custom' && printConfiguration.customWidth 
-                    ? printConfiguration.customWidth 
-                    : paperSize.width;
-                  const paperH = printConfiguration.sizeType === 'Custom' && printConfiguration.customHeight 
-                    ? printConfiguration.customHeight 
-                    : paperSize.height;
-                  // Apply orientation - swap dimensions for landscape
-                  const finalPaperW = printConfiguration.orientation === 'landscape' ? paperH : paperW;
-                  const finalPaperH = printConfiguration.orientation === 'landscape' ? paperW : paperH;
-                  
-                  return (
-                    <div
-                      className="relative transform transition-transform duration-200 ease-out"
-                      style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
-                    >
-                      {/* Paper outline */}
-                      <div 
-                        className="relative bg-white shadow-2xl rounded-sm"
-                        style={{ 
-                          width: `${finalPaperW * CANVAS_SCALE}px`,
-                          height: `${finalPaperH * CANVAS_SCALE}px`,
-                          border: '2px dashed #9333ea',
-                          backgroundImage: 'linear-gradient(45deg, #f8f8f8 25%, transparent 25%), linear-gradient(-45deg, #f8f8f8 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #f8f8f8 75%), linear-gradient(-45deg, transparent 75%, #f8f8f8 75%)',
-                          backgroundSize: '20px 20px',
-                          backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px'
-                        }}
-                      >
-                        {/* Paper size label */}
-                        <div className="absolute -top-6 left-0 text-xs text-primary-600 font-medium">
-                          Paper: {finalPaperW.toFixed(0)}mm x {finalPaperH.toFixed(0)}mm ({printConfiguration.sizeType})
+                      <div>
+                        <Label className="text-xs text-gray-500">Image</Label>
+                        <div className="mt-1">
+                          <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-400 hover:bg-primary-50 transition-colors">
+                            <ImageIcon className="h-4 w-4 text-gray-400" />
+                            <span className="text-xs text-gray-500">
+                              {isUploadingBg ? 'Uploading...' : settings.backgroundImageUrl ? 'Change Image' : 'Upload Image'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleBackgroundImageUpload}
+                              className="hidden"
+                              disabled={isUploadingBg}
+                            />
+                          </label>
+                          {settings.backgroundImageUrl && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => updateSettings({ backgroundImageUrl: '' })}
+                              className="w-full mt-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+                            >
+                              Remove Image
+                            </Button>
+                          )}
                         </div>
-                    
-                    {/* Badge centered on paper */}
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <BadgeCanvas
-                        width={canvasWidth}
-                        height={canvasHeight}
-                        backgroundColor={settings.backgroundColor}
-                        backgroundImageUrl={settings.backgroundImageUrl}
-                        backgroundImageFit={settings.backgroundImageFit}
-                        components={canvasComponents}
-                        selectedComponentId={selectedComponentId}
-                        onComponentSelect={setSelectedComponentId}
-                        onComponentMove={(id, x, y) => updateComponent(id, { x, y })}
-                        onComponentResize={(id, w, h) => updateComponent(id, { width: w, height: h })}
-                        event={event}
-                      />
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
+
+
+      {/* EXPORT MODAL - Responsive Flex Column Layout */}
+      {/* modal={false} allows Select dropdowns to work inside the dialog */}
+      <Dialog open={showExportModal} onOpenChange={setShowExportModal} modal={false}>
+        <DialogContent 
+          className="w-full max-w-4xl flex flex-col overflow-hidden"
+          style={{ maxHeight: '90vh' }}
+        >
+          {/* Fixed Header - Never shrinks */}
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>Export & Print Settings</DialogTitle>
+            <DialogDescription>Configure paper size, margins, and preview before printing</DialogDescription>
+          </DialogHeader>
+          
+          {/* Scrollable Body - Takes remaining space, scrolls when needed */}
+          <div className="flex-1 min-h-0 overflow-y-auto mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-6">
+              {/* Print Settings */}
+              <div className="pr-2">
+                <BadgePrintSettings
+                  configuration={printConfiguration}
+                  badgeWidth={width}
+                  badgeHeight={height}
+                  onConfigurationChange={setPrintConfiguration}
+                />
+              </div>
+              
+              {/* Preview */}
+              <div className="bg-gray-100 rounded-lg p-4 flex items-center justify-center min-h-[200px]">
+                <div className="text-center">
+                  <div className="bg-white shadow-lg rounded-lg p-8 inline-block">
+                    <div 
+                      className="border-2 border-dashed border-primary-300 relative"
+                      style={{
+                        width: `${Math.min(300, width * 2)}px`,
+                        height: `${Math.min(200, height * 2)}px`,
+                        backgroundColor: settings.backgroundColor
+                      }}
+                    >
+                      <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-xs">
+                        Badge Preview
+                      </div>
                     </div>
                   </div>
-                </div>
-                  );
-                })()
-              ) : (
-                /* Design Mode - Show badge only */
-                <div
-                  className="relative transform transition-transform duration-200 ease-out shadow-2xl rounded-lg"
-                  style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center' }}
-                >
-                  <BadgeCanvas
-                    width={canvasWidth}
-                    height={canvasHeight}
-                    backgroundColor={settings.backgroundColor}
-                    backgroundImageUrl={settings.backgroundImageUrl}
-                    backgroundImageFit={settings.backgroundImageFit}
-                    components={canvasComponents}
-                    selectedComponentId={selectedComponentId}
-                    onComponentSelect={setSelectedComponentId}
-                    onComponentMove={(id, x, y) => updateComponent(id, { x, y })}
-                    onComponentResize={(id, w, h) => updateComponent(id, { width: w, height: h })}
-                    event={event}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="px-4 py-2.5 bg-gradient-to-r gradient-primary">
-              <div className="flex items-center justify-between text-white">
-                <span className="text-xs font-semibold">
-                  Badge: {width.toFixed(1)}mm x {height.toFixed(1)}mm
-                </span>
-                <div className="flex items-center gap-3">
-                  {showPrintPreview && (() => {
-                    const paperSize = PRINT_PAPER_SIZES[printConfiguration.sizeType] || PRINT_PAPER_SIZES.A4;
-                    const pW = printConfiguration.sizeType === 'Custom' && printConfiguration.customWidth 
-                      ? printConfiguration.customWidth : paperSize.width;
-                    const pH = printConfiguration.sizeType === 'Custom' && printConfiguration.customHeight 
-                      ? printConfiguration.customHeight : paperSize.height;
-                    // Swap dimensions for landscape orientation
-                    const finalW = printConfiguration.orientation === 'landscape' ? pH : pW;
-                    const finalH = printConfiguration.orientation === 'landscape' ? pW : pH;
-                    return (
-                      <span className="text-xs opacity-80">
-                        Paper: {finalW.toFixed(0)}mm x {finalH.toFixed(0)}mm
-                      </span>
-                    );
-                  })()}
-                  <span className="text-xs opacity-80">
-                    {settings.size?.toUpperCase() || 'CR80'}
-                  </span>
+                  <p className="text-xs text-gray-500 mt-4">
+                    Badge: {width.toFixed(1)}mm × {height.toFixed(1)}mm
+                  </p>
                 </div>
               </div>
             </div>
-          </section>
+          </div>
 
-          {/* Right Sidebar - COMPONENT SETTINGS - Fixed width */}
-          <section className="flex flex-col overflow-hidden rounded-xl border border-primary-200 bg-white shadow-lg min-h-[500px]">
-            <div className="px-4 py-3 bg-gradient-to-r gradient-primary">
-              <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                Component Settings
-              </h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {selectedComponent ? (
-                <ComponentStylingPanel
-                  component={selectedComponent}
-                  onUpdate={(updates) => updateComponent(selectedComponent.id, updates)}
-                  onDelete={() => deleteComponent(selectedComponent.id)}
-                  logoUrl={settings.logoUrl}
-                  onLogoUrlChange={(url) => updateSettings({ logoUrl: url })}
-                />
+          {/* Fixed Footer - Never shrinks */}
+          <DialogFooter className="flex-shrink-0 mt-4 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowExportModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleTestPrint}
+              disabled={isPrinting}
+              className="gradient-primary text-white"
+            >
+              {isPrinting ? (
+                <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />Printing...</>
               ) : (
-                <div className="h-full flex items-center justify-center text-center px-4">
-                  <div className="space-y-4">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-primary-100 to-blue-100 flex items-center justify-center">
-                      <MousePointer2 className="h-8 w-8 text-primary-500" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-700 font-semibold">Select a component</p>
-                      <p className="text-xs text-gray-500 mt-2 max-w-[200px] mx-auto">
-                        Click any component on the canvas to edit its properties
-                      </p>
-                    </div>
-                    <div className="pt-4 border-t border-gray-200">
-                      <p className="text-xs text-gray-400 font-medium mb-2">Keyboard Shortcuts</p>
-                      <div className="space-y-1 text-xs text-gray-500">
-                        <div className="flex items-center justify-center gap-2">
-                          <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono">Delete</kbd>
-                          <span>Remove component</span>
-                        </div>
-                        <div className="flex items-center justify-center gap-2">
-                          <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono">Ctrl+Z</kbd>
-                          <span>Undo</span>
-                        </div>
-                        <div className="flex items-center justify-center gap-2">
-                          <kbd className="px-1.5 py-0.5 bg-gray-100 rounded text-[10px] font-mono">Esc</kbd>
-                          <span>Deselect</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <><Download className="h-4 w-4 mr-2" />Print Badge</>
               )}
-            </div>
-          </section>
-        </div>
-      </main>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* DELETE CONFIRMATION */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogContent className="bg-white max-w-md">
+        <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-gray-900">Delete Component?</AlertDialogTitle>
-            <AlertDialogDescription className="text-gray-600">
-              Are you sure you want to delete this component? This action can be undone with Ctrl+Z.
+            <AlertDialogTitle>Delete Component?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action can be undone with Ctrl+Z.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex flex-row justify-end gap-3 mt-4">
-            <AlertDialogCancel className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 px-4 py-2">
-              Cancel
-            </AlertDialogCancel>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction 
-              onClick={confirmDeleteComponent}
-              style={{ backgroundColor: '#dc2626', color: 'white' }}
-              className="px-4 py-2 hover:opacity-90"
+              onClick={confirmDeleteComponent} 
+              className="!bg-red-600 !text-white hover:!bg-red-700 focus:ring-red-500"
             >
               Delete
             </AlertDialogAction>
@@ -1841,125 +1855,203 @@ function BadgeDesignerContent({ eventId, onClose }: BadgeDesignerProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Save Template Dialog */}
+      {/* SAVE TEMPLATE DIALOG */}
       <Dialog open={showSaveTemplateDialog} onOpenChange={setShowSaveTemplateDialog}>
-        <DialogContent className="bg-white max-w-md">
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-gray-900">Save as New Template</DialogTitle>
-            <DialogDescription className="text-gray-600">
-              Give your badge template a name so you can use it later.
-            </DialogDescription>
+            <DialogTitle>Save as New Template</DialogTitle>
+            <DialogDescription>Give your badge template a name</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="template-name" className="text-sm font-medium text-gray-700">
-                Template Name
-              </Label>
+            <div>
+              <Label htmlFor="template-name" className="text-sm">Template Name</Label>
               <Input
                 id="template-name"
                 value={newTemplateName}
                 onChange={(e) => setNewTemplateName(e.target.value)}
-                placeholder="e.g., Conference Badge, VIP Badge"
-                className="h-10"
+                placeholder="e.g., Conference Badge"
+                className="mt-1"
               />
             </div>
             <div className="flex items-center gap-2">
-              <Switch
-                id="save-as-default"
-                checked={saveAsDefault}
-                onCheckedChange={setSaveAsDefault}
-              />
-              <Label htmlFor="save-as-default" className="text-sm text-gray-600 cursor-pointer">
-                Set as default template for this event
-              </Label>
+              <Switch checked={saveAsDefault} onCheckedChange={setSaveAsDefault} />
+              <Label className="text-sm text-gray-600">Set as default</Label>
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-            <button
-              onClick={() => {
-                setShowSaveTemplateDialog(false);
-                setNewTemplateName('');
-                setSaveAsDefault(false);
-              }}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                border: '1px solid #d1d5db',
-                backgroundColor: 'white',
-                color: '#374151',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 500
-              }}
-            >
-              Cancel
-            </button>
-            <button
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveTemplateDialog(false)}>Cancel</Button>
+            <Button
               onClick={handleSaveAsTemplate}
               disabled={!newTemplateName.trim() || isSavingTemplate}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                border: 'none',
-                backgroundColor: !newTemplateName.trim() || isSavingTemplate ? '#a78bfa' : '#7c3aed',
-                color: 'white',
-                cursor: !newTemplateName.trim() || isSavingTemplate ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-                fontWeight: 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
+              className="gradient-primary text-white"
             >
-              {isSavingTemplate ? (
-                <>
-                  <div style={{ 
-                    width: '16px', 
-                    height: '16px', 
-                    border: '2px solid white', 
-                    borderTopColor: 'transparent', 
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite'
-                  }}></div>
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4" />
-                  Save Template
-                </>
-              )}
-            </button>
-          </div>
+              {isSavingTemplate ? 'Saving...' : 'Save Template'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
-      </div>
+
+      {/* TEMPLATES GALLERY MODAL */}
+      <Dialog open={showTemplatesModal} onOpenChange={setShowTemplatesModal}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
+            <DialogTitle className="flex items-center gap-2">
+              <LayoutTemplate className="h-5 w-5" />
+              Badge Templates
+            </DialogTitle>
+            <DialogDescription>Choose a template to start with or load a saved design</DialogDescription>
+          </DialogHeader>
+          
+          <Tabs defaultValue="my-templates" className="flex-1 flex flex-col min-h-0 mt-4">
+            <TabsList className="grid w-full grid-cols-2 shrink-0">
+              <TabsTrigger value="my-templates">My Templates</TabsTrigger>
+              <TabsTrigger value="system-templates">System Templates</TabsTrigger>
+            </TabsList>
+            
+            {/* My Templates Tab */}
+            <TabsContent value="my-templates" className="flex-1 overflow-y-auto mt-4">
+              {savedTemplates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                    <FolderOpen className="h-8 w-8 text-gray-400" />
+                  </div>
+                  <p className="text-sm font-medium text-gray-600">No saved templates yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Save your current design as a template to reuse it later</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => {
+                      setShowTemplatesModal(false);
+                      setNewTemplateName('');
+                      setSaveAsDefault(false);
+                      setShowSaveTemplateDialog(true);
+                    }}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Save Current as Template
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {savedTemplates.map((template) => (
+                    <div
+                      key={template.id}
+                      className="group relative border rounded-lg p-4 hover:border-primary-400 hover:shadow-md transition-all cursor-pointer bg-white"
+                      onClick={() => {
+                        loadTemplateIntoDesigner(template);
+                        setShowTemplatesModal(false);
+                        // Update saved state ref to match loaded template
+                        lastSavedStateRef.current = JSON.stringify({
+                          components: template.template_data.components || [],
+                          backgroundImageUrl: template.template_data.backgroundImageUrl || '',
+                          logoUrl: template.template_data.logoUrl || '',
+                          backgroundColor: template.template_data.backgroundColor || '#f3f4f6'
+                        });
+                        setHasUnsavedChanges(false);
+                      }}
+                    >
+                      {/* Template Preview */}
+                      <div 
+                        className="aspect-[4/3] rounded-md mb-3 flex items-center justify-center border"
+                        style={{ backgroundColor: template.template_data.backgroundColor || '#f3f4f6' }}
+                      >
+                        <FileText className="h-8 w-8 text-gray-400" />
+                      </div>
+                      
+                      {/* Template Info */}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-medium text-gray-900 truncate flex-1">{template.name}</h4>
+                          {template.is_default && (
+                            <span className="text-[9px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded shrink-0">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-gray-500">
+                          {template.template_data.size || 'CR80'} • {template.template_data.components?.length || 0} elements
+                        </p>
+                      </div>
+                      
+                      {/* Delete Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteTemplate(template.id);
+                        }}
+                        className="absolute top-2 right-2 p-1.5 rounded-md bg-white/80 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+            
+            {/* System Templates Tab */}
+            <TabsContent value="system-templates" className="flex-1 overflow-y-auto mt-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {systemTemplates.map((template) => (
+                  <div
+                    key={template.id}
+                    className="border rounded-lg p-4 hover:border-primary-400 hover:shadow-md transition-all cursor-pointer bg-white"
+                    onClick={() => {
+                      // For now, just show a message - system templates would load predefined layouts
+                      alert(`System template "${template.name}" would be loaded here. This feature is coming soon!`);
+                    }}
+                  >
+                    {/* Template Preview */}
+                    <div className="aspect-[4/3] rounded-md mb-3 flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 border text-3xl">
+                      {template.preview}
+                    </div>
+                    
+                    {/* Template Info */}
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium text-gray-900">{template.name}</h4>
+                      <p className="text-[10px] text-gray-500">{template.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </TabsContent>
+          </Tabs>
+          
+          <DialogFooter className="shrink-0 mt-4 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowTemplatesModal(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* NEW DESIGN CONFIRMATION */}
+      <AlertDialog open={showNewDesignConfirm} onOpenChange={setShowNewDesignConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Start New Design?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Starting a new design will clear the current canvas. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleNewDesign}
+              className="!bg-primary-600 !text-white hover:!bg-primary-700"
+            >
+              Start New
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-// Palette Component Button
-interface PaletteItemProps {
-  type: string;
-  fieldName?: string;
-  label: string;
-  onAdd: (type: string, fieldName?: string, label?: string) => void;
-  children: React.ReactNode;
-}
 
-function PaletteItem({ type, fieldName, label, onAdd, children }: PaletteItemProps) {
-  return (
-    <button
-      type="button"
-      onClick={() => onAdd(type, fieldName, label)}
-      className="w-full flex items-center gap-1.5 px-2 py-1.5 min-h-[32px] bg-gradient-to-r from-primary-50 to-transparent border border-primary-200 rounded hover:from-primary-100 hover:to-primary-50 hover:border-primary-400 hover:shadow-sm transition-all duration-200 text-left text-xs font-medium text-primary-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 active:scale-[0.98]"
-    >
-      {children}
-    </button>
-  );
-}
-
-// Badge Canvas
+// Badge Canvas Component
 interface BadgeCanvasProps {
   width: number;
   height: number;
@@ -1968,10 +2060,11 @@ interface BadgeCanvasProps {
   backgroundImageFit?: 'cover' | 'contain';
   components: CanvasComponent[];
   selectedComponentId: string | null;
-  onComponentSelect: (id: string) => void;
+  onComponentSelect: (id: string | null) => void;
   onComponentMove: (id: string, x: number, y: number) => void;
   onComponentResize: (id: string, width: number, height: number) => void;
   event: Event;
+  zoomLevel: number; // Added for coordinate compensation
 }
 
 function BadgeCanvas({
@@ -1985,7 +2078,8 @@ function BadgeCanvas({
   onComponentSelect,
   onComponentMove,
   onComponentResize,
-  event
+  event,
+  zoomLevel
 }: BadgeCanvasProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
@@ -2005,12 +2099,11 @@ function BadgeCanvas({
   const gridOverlayStyle: React.CSSProperties = {
     backgroundSize: '10px 10px',
     backgroundImage:
-      'linear-gradient(to right, rgba(124, 58, 237, 0.2) 1px, transparent 1px), ' +
-      'linear-gradient(to bottom, rgba(124, 58, 237, 0.2) 1px, transparent 1px)',
+      'linear-gradient(to right, rgba(124, 58, 237, 0.15) 1px, transparent 1px), ' +
+      'linear-gradient(to bottom, rgba(124, 58, 237, 0.15) 1px, transparent 1px)',
     opacity: 0.5
   };
 
-  // Center guidelines
   const centerX = width / 2;
   const centerY = height / 2;
 
@@ -2018,67 +2111,80 @@ function BadgeCanvas({
     <div
       ref={canvasRef}
       data-badge-canvas="true"
-      className="relative border-2 border-gray-400 shadow-2xl transition-all rounded-lg overflow-hidden bg-white cursor-default"
+      className="relative border-2 border-gray-300 shadow-2xl rounded-lg overflow-hidden bg-white cursor-default"
       style={backgroundStyle}
-      onClick={(e) => {
-        e.stopPropagation();
-        onComponentSelect(null as any);
+      onMouseDown={(e) => {
+        // Only deselect if clicking directly on the canvas background, not on a component
+        if (e.target === e.currentTarget) {
+          e.stopPropagation();
+          onComponentSelect(null);
+        }
       }}
     >
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={gridOverlayStyle}
-        aria-hidden="true"
-      />
+      <div className="absolute inset-0 pointer-events-none" style={gridOverlayStyle} />
 
-      {/* Center horizontal line */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          left: 0,
-          top: `${(centerY / height) * 100}%`,
-          width: '100%',
-          height: '1px',
-          backgroundColor: 'rgba(200, 100, 255, 0.3)',
-          borderTop: '1px dashed rgba(124, 58, 237, 0.4)'
-        }}
-        aria-hidden="true"
-      />
+      {/* Center guides */}
+      <div className="absolute pointer-events-none" style={{ left: 0, top: `${(centerY / height) * 100}%`, width: '100%', height: '1px', borderTop: '1px dashed rgba(124, 58, 237, 0.3)' }} />
+      <div className="absolute pointer-events-none" style={{ left: `${(centerX / width) * 100}%`, top: 0, width: '1px', height: '100%', borderLeft: '1px dashed rgba(124, 58, 237, 0.3)' }} />
 
-      {/* Center vertical line */}
-      <div
-        className="absolute pointer-events-none"
-        style={{
-          left: `${(centerX / width) * 100}%`,
-          top: 0,
-          width: '1px',
-          height: '100%',
-          backgroundColor: 'rgba(200, 100, 255, 0.3)',
-          borderLeft: '1px dashed rgba(124, 58, 237, 0.4)'
-        }}
-        aria-hidden="true"
-      />
+      {components.map(component => {
+        const isTextComponent = ['field', 'eventName', 'customText'].includes(component.type);
+        
+        if (isTextComponent) {
+          let displayText = '';
+          if (component.type === 'eventName') {
+            displayText = (component.customText && component.customText.trim().length > 0) ? component.customText : event.name;
+          } else if (component.type === 'field') {
+            displayText = `Sample ${component.label}`;
+          } else if (component.type === 'customText') {
+            displayText = component.customText || 'Custom Text';
+          }
 
-      {components.map(component => (
-        <CanvasComponentItem
-          key={component.id}
-          component={component}
-          isSelected={selectedComponentId === component.id}
-          canvasWidth={width}
-          canvasHeight={height}
-          onSelect={() => onComponentSelect(component.id)}
-          onMove={onComponentMove}
-          onResize={onComponentResize}
-          event={event}
-        />
-      ))}
+          return (
+            <ResizableTextComponent
+              key={component.id}
+              id={component.id}
+              x={component.x}
+              y={component.y}
+              width={component.width}
+              height={component.height}
+              text={displayText}
+              baseFontSize={component.fontSize || 16}
+              color={component.color || '#000000'}
+              fontFamily={component.fontFamily || 'sans-serif'}
+              fontWeight={component.fontWeight || 'normal'}
+              textAlign={component.textAlign as 'left' | 'center' | 'right' || 'left'}
+              rotation={component.rotation}
+              isSelected={selectedComponentId === component.id}
+              onSelect={() => onComponentSelect(component.id)}
+              onMove={(x, y) => onComponentMove(component.id, x, y)}
+              onResize={(w, h) => onComponentResize(component.id, w, h)}
+              containerRef={canvasRef}
+            />
+          );
+        }
+
+        return (
+          <CanvasComponentItem
+            key={component.id}
+            component={component}
+            isSelected={selectedComponentId === component.id}
+            canvasWidth={width}
+            canvasHeight={height}
+            onSelect={() => onComponentSelect(component.id)}
+            onMove={onComponentMove}
+            onResize={onComponentResize}
+            event={event}
+            zoomLevel={zoomLevel}
+          />
+        );
+      })}
 
       {components.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center text-gray-400">
-            <Plus className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="text-sm font-medium">Click components to add them</p>
-            <p className="text-xs mt-1 opacity-70">They will appear centered on the badge</p>
+            <Plus className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">Click tools on the left to add elements</p>
           </div>
         </div>
       )}
@@ -2086,7 +2192,9 @@ function BadgeCanvas({
   );
 }
 
-// Individual Canvas Component
+
+// Canvas Component Item (for non-text components like QR, Logo)
+// Uses custom rotation-aware drag and resize logic (no re-resizable library)
 interface CanvasComponentItemProps {
   component: CanvasComponent;
   isSelected: boolean;
@@ -2096,6 +2204,7 @@ interface CanvasComponentItemProps {
   onMove: (id: string, x: number, y: number) => void;
   onResize: (id: string, width: number, height: number) => void;
   event: Event;
+  zoomLevel: number;
 }
 
 function CanvasComponentItem({
@@ -2106,107 +2215,162 @@ function CanvasComponentItem({
   onSelect,
   onMove,
   onResize,
-  event
+  event,
+  zoomLevel: _zoomLevel
 }: CanvasComponentItemProps) {
   const [qrCodeUrl, setQrCodeUrl] = useState('');
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isResizing, setIsResizing] = useState(false);
+  const [activeHandle, setActiveHandle] = useState<HandlePosition | null>(null);
   const componentRef = useRef<HTMLDivElement>(null);
+  
+  // Store initial values when drag/resize starts
+  const initialState = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+  });
 
   useEffect(() => {
     if (component.type === 'qrcode') {
-      QRCodeLib.toDataURL('SAMPLE-QR-CODE', {
-        width: 200,
-        margin: 1
-      }).then(setQrCodeUrl);
+      QRCodeLib.toDataURL('SAMPLE-QR-CODE', { width: 200, margin: 1 }).then(setQrCodeUrl);
     }
   }, [component.type]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('.resize-handle')) {
-      return; // Don't start drag if clicking resize handle
-    }
-    
+    if ((e.target as HTMLElement).dataset.handle) return;
+    e.preventDefault();
     e.stopPropagation();
+    onSelect();
+    
+    initialState.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      x: component.x,
+      y: component.y,
+      width: component.width,
+      height: component.height,
+    };
     setIsDragging(true);
-    setDragStart({
-      x: e.clientX - (component.x / 100) * canvasWidth,
-      y: e.clientY - (component.y / 100) * canvasHeight
-    });
   };
 
+  const handleHandleMouseDown = (e: React.MouseEvent, handle: HandlePosition) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    initialState.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      x: component.x,
+      y: component.y,
+      width: component.width,
+      height: component.height,
+    };
+    setActiveHandle(handle);
+    setIsResizing(true);
+  };
+
+  // Get container rect for coordinate conversion
+  const getContainerRect = useCallback(() => {
+    // Find the canvas element
+    const canvas = componentRef.current?.closest('[data-badge-canvas]');
+    if (!canvas) return { width: canvasWidth, height: canvasHeight, left: 0, top: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return { width: rect.width, height: rect.height, left: rect.left, top: rect.top };
+  }, [canvasWidth, canvasHeight]);
+
   useEffect(() => {
-    if (!isDragging) return;
+    if (!isDragging && !isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newX = ((e.clientX - dragStart.x) / canvasWidth) * 100;
-      const newY = ((e.clientY - dragStart.y) / canvasHeight) * 100;
-      onMove(
-        component.id,
-        Math.max(0, Math.min(100 - component.width, newX)),
-        Math.max(0, Math.min(100 - component.height, newY))
-      );
+      const rect = getContainerRect();
+      const rotation = component.rotation || 0;
+
+      if (isDragging) {
+        // Convert screen-space mouse delta to percentage
+        const screenDeltaX = ((e.clientX - initialState.current.mouseX) / rect.width) * 100;
+        const screenDeltaY = ((e.clientY - initialState.current.mouseY) / rect.height) * 100;
+        
+        const proposedX = initialState.current.x + screenDeltaX;
+        const proposedY = initialState.current.y + screenDeltaY;
+        
+        // Convert to center for AABB constraint
+        const proposedCenterX = proposedX + component.width / 2;
+        const proposedCenterY = proposedY + component.height / 2;
+        
+        const constrained = constrainRotatedToCanvas(
+          proposedCenterX,
+          proposedCenterY,
+          component.width,
+          component.height,
+          rotation
+        );
+        
+        const newX = constrained.x - component.width / 2;
+        const newY = constrained.y - component.height / 2;
+        
+        onMove(component.id, newX, newY);
+      }
+
+      if (isResizing && activeHandle) {
+        // Convert mouse position to percentage
+        const mouseXPercent = ((e.clientX - rect.left) / rect.width) * 100;
+        const mouseYPercent = ((e.clientY - rect.top) / rect.height) * 100;
+
+        // Current element center
+        const currentCenterX = initialState.current.x + initialState.current.width / 2;
+        const currentCenterY = initialState.current.y + initialState.current.height / 2;
+
+        // Use anchor-based resize calculation
+        const result = calculateAnchorBasedResize(
+          mouseXPercent,
+          mouseYPercent,
+          currentCenterX,
+          currentCenterY,
+          initialState.current.width,
+          initialState.current.height,
+          rotation,
+          activeHandle,
+          MIN_WIDTH_PERCENT,
+          MIN_HEIGHT_PERCENT
+        );
+
+        // Constrain using AABB
+        const constrained = constrainRotatedToCanvas(
+          result.newCenterX,
+          result.newCenterY,
+          result.newWidth,
+          result.newHeight,
+          rotation
+        );
+        
+        // Convert center back to top-left position
+        const newX = constrained.x - result.newWidth / 2;
+        const newY = constrained.y - result.newHeight / 2;
+
+        onMove(component.id, newX, newY);
+        onResize(component.id, result.newWidth, result.newHeight);
+      }
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      setIsResizing(false);
+      setActiveHandle(null);
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
     return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragStart, canvasWidth, canvasHeight, component.id, component.width, component.height, onMove]);
-
-  const handleResizeStop = (_e: any, _direction: any, ref: any, _delta: any) => {
-    const newWidth = (ref.offsetWidth / canvasWidth) * 100;
-    const newHeight = (ref.offsetHeight / canvasHeight) * 100;
-    onResize(component.id, Math.min(100, newWidth), Math.min(100, newHeight));
-  };
+  }, [isDragging, isResizing, activeHandle, component.id, component.width, component.height, component.rotation, onMove, onResize, getContainerRect]);
 
   const renderContent = () => {
-    // Map text-align to justify-content for flexbox (consistent with print)
-    const justifyContent = component.textAlign === 'center' ? 'center' : component.textAlign === 'right' ? 'flex-end' : 'flex-start';
-    
-    if (component.type === 'eventName') {
-      return (
-        <div
-          className="w-full h-full flex items-center overflow-hidden"
-          style={{
-            fontSize: `${component.fontSize}px`,
-            fontFamily: component.fontFamily,
-            fontWeight: component.fontWeight,
-            fontStyle: component.fontStyle,
-            justifyContent,
-            color: ensureReadableColor(component.color)
-          }}
-        >
-          {(component.customText && component.customText.trim().length > 0) ? component.customText : event.name}
-        </div>
-      );
-    }
-
-    if (component.type === 'field') {
-      return (
-        <div
-          className="w-full h-full flex items-center overflow-hidden"
-          style={{
-            fontSize: `${component.fontSize}px`,
-            fontFamily: component.fontFamily,
-            fontWeight: component.fontWeight,
-            fontStyle: component.fontStyle,
-            justifyContent,
-            color: ensureReadableColor(component.color)
-          }}
-        >
-          <span>Sample {component.label}</span>
-        </div>
-      );
-    }
-
     if (component.type === 'qrcode' && qrCodeUrl) {
       return (
         <div className="w-full h-full flex items-center justify-center p-1">
@@ -2223,86 +2387,87 @@ function CanvasComponentItem({
       );
     }
 
-    if (component.type === 'customText') {
-      return (
-        <div
-          className="w-full h-full flex items-center overflow-hidden"
-          style={{
-            fontSize: `${component.fontSize}px`,
-            fontFamily: component.fontFamily,
-            fontWeight: component.fontWeight,
-            fontStyle: component.fontStyle,
-            justifyContent,
-            color: ensureReadableColor(component.color)
-          }}
-        >
-          {component.customText || 'Custom Text'}
-        </div>
-      );
-    }
-
     return null;
   };
 
+  const rotation = component.rotation || 0;
+
+  // Handle positions relative to element
+  const handles: { position: HandlePosition; style: React.CSSProperties }[] = [
+    { position: 'nw', style: { top: -HANDLE_SIZE/2, left: -HANDLE_SIZE/2 } },
+    { position: 'n', style: { top: -HANDLE_SIZE/2, left: '50%', transform: 'translateX(-50%)' } },
+    { position: 'ne', style: { top: -HANDLE_SIZE/2, right: -HANDLE_SIZE/2 } },
+    { position: 'e', style: { top: '50%', right: -HANDLE_SIZE/2, transform: 'translateY(-50%)' } },
+    { position: 'se', style: { bottom: -HANDLE_SIZE/2, right: -HANDLE_SIZE/2 } },
+    { position: 's', style: { bottom: -HANDLE_SIZE/2, left: '50%', transform: 'translateX(-50%)' } },
+    { position: 'sw', style: { bottom: -HANDLE_SIZE/2, left: -HANDLE_SIZE/2 } },
+    { position: 'w', style: { top: '50%', left: -HANDLE_SIZE/2, transform: 'translateY(-50%)' } },
+  ];
+
   return (
-    <Resizable
-      size={{
-        width: `${component.width}%`,
-        height: `${component.height}%`
-      }}
-      onResizeStop={handleResizeStop}
-      enable={{
-        top: isSelected,
-        right: isSelected,
-        bottom: isSelected,
-        left: isSelected,
-        topRight: isSelected,
-        bottomRight: isSelected,
-        bottomLeft: isSelected,
-        topLeft: isSelected
-      }}
-      minWidth="5%"
-      minHeight="3%"
-      maxWidth="100%"
-      maxHeight="100%"
+    <div
+      ref={componentRef}
+      data-component-id={component.id}
+      className="absolute select-none"
       style={{
-        position: 'absolute',
         left: `${component.x}%`,
         top: `${component.y}%`,
-        cursor: isDragging ? 'grabbing' : 'grab'
+        width: `${component.width}%`,
+        height: `${component.height}%`,
+        cursor: isDragging ? 'grabbing' : 'grab',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        transform: rotation ? `rotate(${rotation}deg)` : undefined,
+        transformOrigin: 'center',
+        zIndex: isSelected ? 50 : undefined,
       }}
-      className={`${isSelected ? 'ring-2 ring-primary-500 ring-offset-2 shadow-lg' : 'hover:ring-1 hover:ring-primary-300'}`}
-      handleClasses={{
-        top: 'resize-handle',
-        right: 'resize-handle',
-        bottom: 'resize-handle',
-        left: 'resize-handle',
-        topRight: 'resize-handle',
-        bottomRight: 'resize-handle',
-        bottomLeft: 'resize-handle',
-        topLeft: 'resize-handle'
+      onMouseDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleMouseDown(e);
+      }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onSelect();
       }}
     >
-      <div 
-        ref={componentRef}
-        data-component-id={component.id}
-        className="w-full h-full relative"
-        onMouseDown={handleMouseDown}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelect();
-        }}
-      >
+      {/* Content */}
+      <div className="w-full h-full pointer-events-none">
         {renderContent()}
-        {isSelected && (
-          <div className="absolute -top-7 left-0 bg-gradient-to-r from-primary-600 to-blue-600 text-white px-3 py-1 rounded-md text-xs whitespace-nowrap pointer-events-none shadow-md font-medium">
-            {component.label || component.type}
-          </div>
-        )}
       </div>
-    </Resizable>
+
+      {/* Selection Border */}
+      {isSelected && (
+        <div className="absolute inset-0 border-2 border-primary-500 rounded pointer-events-none" />
+      )}
+
+      {/* Label */}
+      {isSelected && (
+        <div className="absolute -top-6 left-0 bg-primary-600 text-white px-2 py-0.5 rounded text-[10px] whitespace-nowrap pointer-events-none shadow">
+          {component.label || component.type}
+        </div>
+      )}
+
+      {/* Resize Handles - cursor dynamically calculated based on rotation */}
+      {isSelected && handles.map(({ position, style }) => (
+        <div
+          key={position}
+          data-handle={position}
+          className="absolute bg-white border border-black z-50"
+          style={{
+            width: HANDLE_SIZE,
+            height: HANDLE_SIZE,
+            cursor: getCursorForHandle(position, rotation),
+            ...style,
+          }}
+          onMouseDown={(e) => handleHandleMouseDown(e, position)}
+        />
+      ))}
+    </div>
   );
 }
+
 
 // Component Styling Panel
 interface ComponentStylingPanelProps {
@@ -2311,6 +2476,8 @@ interface ComponentStylingPanelProps {
   onDelete: () => void;
   logoUrl?: string;
   onLogoUrlChange: (url: string) => void;
+  badgeWidthMm: number;
+  badgeHeightMm: number;
 }
 
 function ComponentStylingPanel({
@@ -2318,273 +2485,232 @@ function ComponentStylingPanel({
   onUpdate,
   onDelete,
   logoUrl,
-  onLogoUrlChange
+  onLogoUrlChange,
+  badgeWidthMm,
+  badgeHeightMm
 }: ComponentStylingPanelProps) {
   const isTextComponent = ['field', 'eventName', 'customText'].includes(component.type);
-  const accordionDefaults = [
-    ...(isTextComponent ? ['text'] as string[] : []),
-    'position',
-    ...(component.type === 'logo' ? ['logo'] : [])
-  ];
+
+  const toMm = (percent: number, totalMm: number) => (percent / 100) * totalMm;
+  const toPercent = (mm: number, totalMm: number) => (mm / totalMm) * 100;
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b bg-gradient-to-r from-primary-50 to-blue-50 px-4 py-3">
-        <h3 className="text-sm font-semibold text-slate-700">Component Settings</h3>
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-gray-200">
+        <div>
+          <p className="text-xs text-gray-500">Editing</p>
+          <p className="text-sm font-semibold text-gray-800">{component.label || component.type}</p>
+        </div>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onDelete}
-                className="h-7 w-7 p-0 text-rose-500 hover:bg-rose-50 hover:text-rose-600"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
+              <Button variant="ghost" size="sm" onClick={onDelete} className="h-8 w-8 p-0 text-red-500 hover:bg-red-50">
+                <Trash2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>
-              <p>Delete Component (Delete key)</p>
-            </TooltipContent>
+            <TooltipContent><p>Delete (Del key)</p></TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
-      <div className="px-4 py-4 space-y-4">
-        <div className="space-y-1">
-          <Label className="text-xs text-slate-500 uppercase tracking-wide">Component Type</Label>
-          <p className="text-sm font-semibold text-primary-700">{component.label || component.type}</p>
-        </div>
 
-        <Accordion type="multiple" defaultValue={accordionDefaults} className="flex flex-col gap-3">
-          {isTextComponent && (
-            <AccordionItem value="text" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
-              <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-slate-700">
-                Text & Formatting
-              </AccordionTrigger>
-              <AccordionContent className="px-4 pt-4 pb-5 max-h-[calc(100vh-360px)] overflow-y-auto space-y-5">
-                {(component.type === 'customText' || component.type === 'eventName') && (
-                  <div className="space-y-2">
-                    <Label className="text-sm font-semibold text-slate-600">
-                      {component.type === 'eventName' ? 'Display Text Override' : 'Text Content'}
-                    </Label>
-                    <Input
-                      value={component.customText || ''}
-                      onChange={(e) => onUpdate({ customText: e.target.value })}
-                      placeholder={component.type === 'eventName' ? 'Leave blank to use event name' : 'Enter custom text'}
-                      className="h-10 text-sm"
-                    />
-                    {component.type === 'eventName' && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        Leaving this empty will display the event name automatically.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Font Size</Label>
-                  <div className="flex items-center gap-3">
-                    <Input
-                      type="number"
-                      value={component.fontSize || 16}
-                      onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
-                      min={8}
-                      max={72}
-                      className="h-10 text-sm"
-                    />
-                    <span className="text-sm text-slate-500 font-medium">px</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Font Family</Label>
-                  <Select
-                    value={component.fontFamily || 'sans-serif'}
-                    onValueChange={(value: string) => onUpdate({ fontFamily: value })}
-                  >
-                    <SelectTrigger className="h-10 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="sans-serif">Sans Serif</SelectItem>
-                      <SelectItem value="serif">Serif</SelectItem>
-                      <SelectItem value="monospace">Monospace</SelectItem>
-                      <SelectItem value="Arial">Arial</SelectItem>
-                      <SelectItem value="Times New Roman">Times New Roman</SelectItem>
-                      <SelectItem value="Courier New">Courier New</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Style</Label>
-                  <div className="flex gap-3">
-                    <Button
-                      variant={component.fontWeight === 'bold' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() =>
-                        onUpdate({
-                          fontWeight: component.fontWeight === 'bold' ? 'normal' : 'bold'
-                        })
-                      }
-                      className={`h-10 flex-1 transition-all duration-200 ${component.fontWeight === 'bold' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
-                    >
-                      <Bold className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={component.fontStyle === 'italic' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() =>
-                        onUpdate({
-                          fontStyle: component.fontStyle === 'italic' ? 'normal' : 'italic'
-                        })
-                      }
-                      className={`h-10 flex-1 transition-all duration-200 ${component.fontStyle === 'italic' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
-                    >
-                      <Italic className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Alignment</Label>
-                  <div className="flex gap-3">
-                    <Button
-                      variant={component.textAlign === 'left' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => onUpdate({ textAlign: 'left' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'left' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
-                    >
-                      <AlignLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={component.textAlign === 'center' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => onUpdate({ textAlign: 'center' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'center' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
-                    >
-                      <AlignCenter className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={component.textAlign === 'right' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => onUpdate({ textAlign: 'right' })}
-                      className={`h-10 flex-1 transition-all duration-200 ${component.textAlign === 'right' ? 'bg-gradient-to-r from-primary-600 to-blue-600 text-white' : ''}`}
-                    >
-                      <AlignRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Text Color</Label>
-                  <div className="flex gap-3">
-                    <Input
-                      type="color"
-                      value={component.color || '#1f2937'}
-                      onChange={(e) => onUpdate({ color: e.target.value })}
-                      className="w-12 h-10 p-1 rounded-lg border border-slate-200"
-                    />
-                    <Input
-                      type="text"
-                      value={component.color || '#1f2937'}
-                      onChange={(e) => onUpdate({ color: e.target.value })}
-                      placeholder="#1f2937"
-                      className="h-10 text-sm flex-1"
-                    />
-                  </div>
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          )}
-
-          <AccordionItem value="position" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
-            <AccordionTrigger className="px-4 py-3 text-sm font-semibold text-slate-700">
-              Position & Size
-            </AccordionTrigger>
-            <AccordionContent className="px-4 pt-4 pb-5 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Position X (%)</Label>
-                  <Input
-                    type="number"
-                    value={component.x.toFixed(1)}
-                    onChange={(e) => onUpdate({ x: parseFloat(e.target.value) })}
-                    min={0}
-                    max={100}
-                    className="h-10 text-sm"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Position Y (%)</Label>
-                  <Input
-                    type="number"
-                    value={component.y.toFixed(1)}
-                    onChange={(e) => onUpdate({ y: parseFloat(e.target.value) })}
-                    min={0}
-                    max={100}
-                    className="h-10 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Width (%)</Label>
-                  <Input
-                    type="number"
-                    value={component.width.toFixed(1)}
-                    onChange={(e) => onUpdate({ width: parseFloat(e.target.value) })}
-                    min={5}
-                    max={100}
-                    className="h-10 text-sm"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-600">Height (%)</Label>
-                  <Input
-                    type="number"
-                    value={component.height.toFixed(1)}
-                    onChange={(e) => onUpdate({ height: parseFloat(e.target.value) })}
-                    min={3}
-                    max={100}
-                    className="h-10 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3 border-t-2 border-slate-200 pt-4">
-                <Switch
-                  checked={component.enabled}
-                  onCheckedChange={(checked: boolean | 'indeterminate') => onUpdate({ enabled: checked as boolean })}
-                />
-                <Label className="text-sm font-semibold text-slate-600">Show on badge</Label>
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-
-          {component.type === 'logo' && (
-            <AccordionItem value="logo" className="border border-slate-200 border-b-0 rounded-xl bg-white shadow-inner">
-              <AccordionTrigger className="px-3 text-sm font-semibold text-slate-700">
-                Logo Options
-              </AccordionTrigger>
-              <AccordionContent className="px-3 space-y-2">
-                <Label className="text-xs font-semibold text-slate-600">Logo URL</Label>
+      {/* Text Settings */}
+      {isTextComponent && (
+        <Collapsible defaultOpen>
+          <CollapsibleTrigger className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-2">
+            <span>Text & Style</span>
+            <ChevronDown className="h-4 w-4" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-3">
+            {(component.type === 'customText' || component.type === 'eventName') && (
+              <div>
+                <Label className="text-xs text-gray-500">Text Content</Label>
                 <Input
-                  type="url"
-                  value={logoUrl || ''}
-                  onChange={(e) => onLogoUrlChange(e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                  className="h-9 text-sm"
+                  value={component.customText || ''}
+                  onChange={(e) => onUpdate({ customText: e.target.value })}
+                  placeholder={component.type === 'eventName' ? 'Leave blank for event name' : 'Enter text'}
+                  className="mt-1 h-9 text-sm"
                 />
-                <p className="text-xs text-slate-500">
-                  Or set in Event Branding settings.
-                </p>
-              </AccordionContent>
-            </AccordionItem>
-          )}
-        </Accordion>
-      </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label className="text-xs text-gray-500">Font Size</Label>
+                <Input
+                  type="number"
+                  value={component.fontSize || 16}
+                  onChange={(e) => onUpdate({ fontSize: parseInt(e.target.value) })}
+                  min={8} max={72}
+                  className="mt-1 h-9 text-sm"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-500">Font</Label>
+                <Select value={component.fontFamily || 'sans-serif'} onValueChange={(v) => onUpdate({ fontFamily: v })}>
+                  <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sans-serif">Sans Serif</SelectItem>
+                    <SelectItem value="serif">Serif</SelectItem>
+                    <SelectItem value="monospace">Monospace</SelectItem>
+                    <SelectItem value="Arial">Arial</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-gray-500">Style</Label>
+              <div className="flex gap-2 mt-1">
+                <Button
+                  variant={component.fontWeight === 'bold' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => onUpdate({ fontWeight: component.fontWeight === 'bold' ? 'normal' : 'bold' })}
+                  className="flex-1 h-9"
+                >
+                  <Bold className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={component.fontStyle === 'italic' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => onUpdate({ fontStyle: component.fontStyle === 'italic' ? 'normal' : 'italic' })}
+                  className="flex-1 h-9"
+                >
+                  <Italic className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-gray-500">Alignment</Label>
+              <div className="flex gap-2 mt-1">
+                <Button variant={component.textAlign === 'left' ? 'default' : 'outline'} size="sm" onClick={() => onUpdate({ textAlign: 'left' })} className="flex-1 h-9">
+                  <AlignLeft className="h-4 w-4" />
+                </Button>
+                <Button variant={component.textAlign === 'center' ? 'default' : 'outline'} size="sm" onClick={() => onUpdate({ textAlign: 'center' })} className="flex-1 h-9">
+                  <AlignCenter className="h-4 w-4" />
+                </Button>
+                <Button variant={component.textAlign === 'right' ? 'default' : 'outline'} size="sm" onClick={() => onUpdate({ textAlign: 'right' })} className="flex-1 h-9">
+                  <AlignRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-gray-500">Color</Label>
+              <div className="flex gap-2 mt-1">
+                <Input type="color" value={component.color || '#000000'} onChange={(e) => onUpdate({ color: e.target.value })} className="w-10 h-9 p-1" />
+                <Input type="text" value={component.color || '#000000'} onChange={(e) => onUpdate({ color: e.target.value })} className="flex-1 h-9 text-sm" />
+              </div>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+
+
+      {/* Position & Size */}
+      <Collapsible defaultOpen>
+        <CollapsibleTrigger className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-2">
+          <span>Position & Size</span>
+          <ChevronDown className="h-4 w-4" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs text-gray-500">X (mm)</Label>
+              <Input
+                type="number"
+                value={toMm(component.x, badgeWidthMm).toFixed(1)}
+                onChange={(e) => onUpdate({ x: toPercent(parseFloat(e.target.value), badgeWidthMm) })}
+                min={0} max={badgeWidthMm} step={0.5}
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-500">Y (mm)</Label>
+              <Input
+                type="number"
+                value={toMm(component.y, badgeHeightMm).toFixed(1)}
+                onChange={(e) => onUpdate({ y: toPercent(parseFloat(e.target.value), badgeHeightMm) })}
+                min={0} max={badgeHeightMm} step={0.5}
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs text-gray-500">Width (mm)</Label>
+              <Input
+                type="number"
+                value={toMm(component.width, badgeWidthMm).toFixed(1)}
+                onChange={(e) => onUpdate({ width: toPercent(parseFloat(e.target.value), badgeWidthMm) })}
+                min={1} step={0.5}
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-500">Height (mm)</Label>
+              <Input
+                type="number"
+                value={toMm(component.height, badgeHeightMm).toFixed(1)}
+                onChange={(e) => onUpdate({ height: toPercent(parseFloat(e.target.value), badgeHeightMm) })}
+                min={1} step={0.5}
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Rotation */}
+          <div>
+            <Label className="text-xs text-gray-500 flex items-center gap-1">
+              <RotateCw className="h-3 w-3" /> Rotation
+            </Label>
+            <div className="flex gap-1 mt-1">
+              {[0, 90, 180, 270].map((angle) => (
+                <Button
+                  key={angle}
+                  variant={(component.rotation || 0) === angle ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => onUpdate({ rotation: angle })}
+                  className="flex-1 h-8 text-xs"
+                >
+                  {angle}°
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Visibility Toggle */}
+          <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+            <Switch checked={component.enabled} onCheckedChange={(checked) => onUpdate({ enabled: checked as boolean })} />
+            <Label className="text-xs text-gray-600">Show on badge</Label>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* Logo Options */}
+      {component.type === 'logo' && (
+        <Collapsible defaultOpen>
+          <CollapsibleTrigger className="flex items-center justify-between w-full text-sm font-medium text-gray-700 mb-2">
+            <span>Logo Settings</span>
+            <ChevronDown className="h-4 w-4" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2">
+            <div>
+              <Label className="text-xs text-gray-500">Logo URL</Label>
+              <Input
+                type="url"
+                value={logoUrl || ''}
+                onChange={(e) => onLogoUrlChange(e.target.value)}
+                placeholder="https://example.com/logo.png"
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+            <p className="text-[10px] text-gray-400">Or set in Event Branding settings</p>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
     </div>
   );
 }

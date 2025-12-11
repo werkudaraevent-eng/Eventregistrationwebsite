@@ -1502,7 +1502,16 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
 
   const handleAddParticipant = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // Prevent double submission
+    
     setIsSubmitting(true);
+
+    // Safety timeout to prevent infinite loading state
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[ParticipantManagement] Add timeout - resetting state');
+      setIsSubmitting(false);
+      alert('Request timed out. Please try again.');
+    }, 30000);
 
     try {
       console.log('[SUPABASE] Adding participant:', formData);
@@ -1517,6 +1526,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         position: formData.position || '',
         customData: formData.customData || {}
       });
+      
+      // Clear timeout immediately after successful creation to prevent race condition
+      clearTimeout(safetyTimeout);
       
       console.log('[SUPABASE] Participant added successfully with QR:', newParticipant);
       
@@ -1593,10 +1605,13 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       setSendConfirmationEmail(false);
       setSelectedTemplateId('');
       setIsAddDialogOpen(false);
-      await fetchParticipants();
+      
+      // Refresh in background (don't await to speed up UI)
+      fetchParticipants().catch(console.error);
       
       // Realtime subscription will handle UI updates automatically
     } catch (err: any) {
+      clearTimeout(safetyTimeout);
       console.error('[SUPABASE] Error adding participant:', err);
       alert(err.message || 'Failed to add participant');
     } finally {
@@ -1755,9 +1770,17 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
   const handleEditParticipant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingParticipant) return;
+    if (isSubmitting) return; // Prevent double submission
 
     setIsSubmitting(true);
     setError(null);
+
+    // Safety timeout to prevent infinite loading state
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[ParticipantManagement] Edit timeout - resetting state');
+      setIsSubmitting(false);
+      setError('Request timed out. Please try again.');
+    }, 30000);
 
     try {
       console.log('[SUPABASE] Updating participant:', editingParticipant.id);
@@ -1777,6 +1800,9 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       if (error) {
         throw new Error(`Failed to update participant: ${error.message}`);
       }
+
+      // Clear timeout immediately after successful update to prevent race condition
+      clearTimeout(safetyTimeout);
 
       // Handle seat assignment changes
       const currentSeat = seatAssignments[editingParticipant.id];
@@ -1807,9 +1833,13 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
       setIsEditDialogOpen(false);
       setEditingParticipant(null);
       
-      // Refresh participants list and seat assignments
-      await fetchParticipants();
-      await fetchSeatAssignments();
+      // Refresh participants list and seat assignments (don't await to speed up UI)
+      fetchParticipants().catch(err => {
+        console.error('[Background Refresh] Failed to refresh participants:', err);
+      });
+      fetchSeatAssignments().catch(err => {
+        console.error('[Background Refresh] Failed to refresh seat assignments:', err);
+      });
       
       // Reset form
       setFormData({
@@ -1823,6 +1853,7 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         selectedSeatNumber: 0
       });
     } catch (err: any) {
+      clearTimeout(safetyTimeout);
       console.error('[SUPABASE] Error updating participant:', err);
       setError(err.message || 'Failed to update participant');
     } finally {
