@@ -533,7 +533,7 @@ export function AgendaManagement({ eventId, accessToken }: AgendaManagementProps
               </DialogContent>
             </Dialog>
 
-      <CardContent className="overflow-visible">
+      <CardContent className="overflow-visible pt-6">
         {agendaItems.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />

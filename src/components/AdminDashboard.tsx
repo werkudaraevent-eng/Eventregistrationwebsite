@@ -10,7 +10,7 @@ import { EmailHistory } from './EmailHistory';
 import SeatingManagement from './SeatingManagement';
 import { UserManagement } from './UserManagement';
 import { LogOut, Users, Calendar, ArrowLeft, Palette, Mail, Send, Settings, History, CreditCard, LayoutGrid, Shield } from 'lucide-react';
-import { supabase } from '../utils/supabase/client';
+import { supabase, isAuthError, handleAuthError } from '../utils/supabase/client';
 import { BadgeDesigner } from './BadgeDesigner';
 import { usePermissions } from '../utils/PermissionContext';
 
@@ -60,6 +60,19 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
           .single();
 
         if (error) {
+          // Check for auth error and attempt recovery
+          if (isAuthError(error)) {
+            console.warn('[AdminDashboard] Auth error detected, attempting recovery...');
+            const recovered = await handleAuthError();
+            if (!recovered) {
+              // Session expired - trigger logout
+              onLogout();
+              return;
+            }
+            // Retry after recovery
+            loadEvent();
+            return;
+          }
           console.error('Error loading event:', error);
         } else {
           setEvent(data);
@@ -72,7 +85,7 @@ export function AdminDashboard({ eventId, accessToken, onLogout, onBackToEvents 
     if (eventId) {
       loadEvent();
     }
-  }, [eventId]);
+  }, [eventId, onLogout]);
 
   const handleTabChange = (tabValue: string) => {
     setActiveTab(tabValue);

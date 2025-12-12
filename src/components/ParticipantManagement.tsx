@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Loader2, Search, Trash2, Download, Users, Plus, Upload, Link2, Edit, ArrowUpDown, ArrowUp, ArrowDown, Mail, Send, Filter, X, Printer } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { ColumnManagement } from './ColumnManagement';
-import { supabase } from '../utils/supabase/client';
+import { supabase, isAuthError, handleAuthError } from '../utils/supabase/client';
 import { createParticipant } from '../utils/supabaseDataLayer';
 import { DEFAULT_PRINT_CONFIG } from '../utils/localDBStub';
 import type { PaperSizeConfiguration } from '../utils/localDBStub';
@@ -193,6 +193,19 @@ export function ParticipantManagement({ eventId, accessToken }: ParticipantManag
         .eq('eventId', eventId);
       
       if (error) {
+        // Check for auth error and attempt recovery
+        if (isAuthError(error)) {
+          console.warn('[SUPABASE] Auth error detected, attempting recovery...');
+          const recovered = await handleAuthError();
+          if (!recovered) {
+            // Session expired, app will redirect to login via event
+            console.log('[SUPABASE] Session recovery failed, user will be logged out');
+            return;
+          }
+          // Retry after recovery
+          console.log('[SUPABASE] Session recovered, retrying fetch...');
+          return fetchParticipants();
+        }
         throw new Error(`Failed to fetch participants: ${error.message}`);
       }
       

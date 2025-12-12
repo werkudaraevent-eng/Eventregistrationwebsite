@@ -105,8 +105,33 @@ export default function App() {
       }
     };
 
+    // Listen for session expired event (from visibility change handler)
+    const handleSessionExpired = () => {
+      console.log('[App] Session expired, logging out...');
+      setAccessToken(null);
+      setSelectedEventId(null);
+    };
+
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    window.addEventListener('supabase:session-expired', handleSessionExpired);
+    
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setAccessToken(null);
+        setSelectedEventId(null);
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.access_token) {
+          setAccessToken(session.access_token);
+        }
+      }
+    });
+    
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('supabase:session-expired', handleSessionExpired);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const handleAuthenticated = (token: string) => {

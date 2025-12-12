@@ -30,7 +30,7 @@ import {
   Settings,
   ArrowRightLeft
 } from 'lucide-react';
-import { supabase } from '../utils/supabase/client';
+import { supabase, isAuthError, handleAuthError } from '../utils/supabase/client';
 
 interface SeatingLayout {
   id: string;
@@ -149,7 +149,19 @@ export default function SeatingManagement({ eventId }: SeatingManagementProps) {
         .eq('event_id', eventId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        // Check for auth error and attempt recovery
+        if (isAuthError(error)) {
+          const recovered = await handleAuthError();
+          if (!recovered) {
+            // Session expired, app will redirect to login
+            return;
+          }
+          // Retry after recovery
+          return fetchLayouts();
+        }
+        throw error;
+      }
       setLayouts(data || []);
       
       // Auto-select first layout
